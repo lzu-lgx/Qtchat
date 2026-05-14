@@ -1,0 +1,7 @@
+build/
+build-*/
+*.user
+*.user.*
+.qtcreator/
+*.autosave
+.vscode/
