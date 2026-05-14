@@ -11,6 +11,12 @@ qt_add_executable(Qtchat
     mainwindow.cpp
     mainwindow.h
     mainwindow.ui
+    model/User.h
+    model/User.cpp
+    model/Message.h
+    model/Message.cpp
+    model/Conversation.h
+    model/Conversation.cpp
 )
 
 target_link_libraries(Qtchat
