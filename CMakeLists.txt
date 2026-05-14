@@ -17,6 +17,8 @@ qt_add_executable(Qtchat
     model/Message.cpp
     model/Conversation.h
     model/Conversation.cpp
+    data/MockData.h
+    data/MockData.cpp
 )
 
 target_link_libraries(Qtchat
