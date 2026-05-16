@@ -2,6 +2,14 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QListWidget>
+#include <QTextEdit>
+#include <QLineEdit>
+#include <QPushButton>
+#include <QLabel>
+
+#include "model/Conversation.h"
+#include "model/Message.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -14,10 +22,26 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
-    ~MainWindow() override;
+    MainWindow(QWidget *parent = nullptr);
+    ~MainWindow();
+
+private:
+    void setupChatUi();
+    void loadMockData();
+    void loadConversations();
+    void showMessagesForConversation(const QString& conversationId);
 
 private:
     Ui::MainWindow *ui;
+
+    QListWidget *m_conversationList;
+    QLabel *m_chatTitleLabel;
+    QTextEdit *m_messageDisplay;
+    QLineEdit *m_messageInput;
+    QPushButton *m_sendButton;
+
+    QList<Conversation> m_conversations;
+    QList<Message> m_messages;
 };
+
 #endif // MAINWINDOW_H
