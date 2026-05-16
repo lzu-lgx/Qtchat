@@ -7,6 +7,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QListWidgetItem>
+#include <QDateTime>
 #include <QDebug>
 
 MainWindow::MainWindow(QWidget *parent)
@@ -81,6 +82,18 @@ void MainWindow::setupChatUi()
                 m_chatTitleLabel->setText(item->text());
                 showMessagesForConversation(conversationId);
             });
+    connect(m_sendButton, &QPushButton::clicked,
+            this, [this]()
+            {
+                sendCurrentMessage();
+            });
+
+    connect(m_messageInput, &QLineEdit::returnPressed,
+            this, [this]()
+            {
+                 sendCurrentMessage();
+            });
+
 }
 
 void MainWindow::loadMockData()
@@ -124,4 +137,35 @@ void MainWindow::showMessagesForConversation(const QString& conversationId)
             m_messageDisplay->append(line);
         }
     }
+}
+
+void MainWindow::sendCurrentMessage()
+{
+    QString content = m_messageInput->text().trimmed();
+
+    if (content.isEmpty()) {
+        return;
+    }
+
+    QListWidgetItem *currentItem = m_conversationList->currentItem();
+
+    if (!currentItem) {
+        return;
+    }
+
+    QString conversationId = currentItem->data(Qt::UserRole).toString();
+
+    Message message(
+        QString::number(QDateTime::currentMSecsSinceEpoch()),
+        "me",
+        conversationId,
+        content,
+        Message::Type::Text
+    );
+
+    m_messages.append(message);
+
+    showMessagesForConversation(conversationId);
+
+    m_messageInput->clear();
 }

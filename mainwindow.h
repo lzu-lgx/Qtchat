@@ -30,6 +30,7 @@ private:
     void loadMockData();
     void loadConversations();
     void showMessagesForConversation(const QString& conversationId);
+    void sendCurrentMessage();
 
 private:
     Ui::MainWindow *ui;
