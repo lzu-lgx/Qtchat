@@ -42,6 +42,7 @@ private:
     QLineEdit *m_messageInput;
     QPushButton *m_sendButton;
     DatabaseManager m_dbManager;
+    QString m_currentConversationId;
 
     QList<Conversation> m_conversations;
     QList<Message> m_messages;

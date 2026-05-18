@@ -84,13 +84,14 @@ void MainWindow::setupChatUi()
 
     connect(m_conversationList, &QListWidget::itemClicked,
         this, [this](QListWidgetItem *item)
-            {
-                QString conversationId = item->data(Qt::UserRole).toString();
+    {
+        m_currentConversationId = item->data(Qt::UserRole).toString();
 
-                QString title = item->text().split('\n').first();
-                m_chatTitleLabel->setText(title);
-                showMessagesForConversation(conversationId);
-            });
+        QString title = item->text().split('\n').first();
+        m_chatTitleLabel->setText(title);
+
+        showMessagesForConversation(m_currentConversationId);
+    });
     connect(m_sendButton, &QPushButton::clicked,
             this, [this]()
             {
@@ -117,14 +118,36 @@ void MainWindow::loadConversations()
 
     m_conversationList->clear();
 
+    QListWidgetItem *itemToSelect = nullptr;
+
     for (const Conversation& conversation : m_conversations)
     {
-        QString itemText = conversation.title() + "\n" + conversation.lastMessage();
+        QString itemText = conversation.title()
+                           + "\n"
+                           + conversation.lastMessage();
 
         QListWidgetItem *item = new QListWidgetItem(itemText);
         item->setData(Qt::UserRole, conversation.id());
 
         m_conversationList->addItem(item);
+
+        if (conversation.id() == m_currentConversationId) {
+            itemToSelect = item;
+        }
+    }
+
+    if (itemToSelect) {
+        m_conversationList->setCurrentItem(itemToSelect);
+    } else if (m_conversationList->count() > 0 && m_currentConversationId.isEmpty()) {
+        QListWidgetItem *firstItem = m_conversationList->item(0);
+        m_conversationList->setCurrentItem(firstItem);
+
+        m_currentConversationId = firstItem->data(Qt::UserRole).toString();
+
+        QString title = firstItem->text().split('\n').first();
+        m_chatTitleLabel->setText(title);
+
+        showMessagesForConversation(m_currentConversationId);
     }
 }
 
@@ -155,13 +178,11 @@ void MainWindow::sendCurrentMessage()
         return;
     }
 
-    QListWidgetItem *currentItem = m_conversationList->currentItem();
-
-    if (!currentItem) {
+    if (m_currentConversationId.isEmpty()) {
         return;
     }
 
-    QString conversationId = currentItem->data(Qt::UserRole).toString();
+    QString conversationId = m_currentConversationId;
 
     Message message(
         QString::number(QDateTime::currentMSecsSinceEpoch()),
