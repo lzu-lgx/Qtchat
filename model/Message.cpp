@@ -19,6 +19,20 @@ Message::Message(const QString& id,
       m_timestamp(QDateTime::currentDateTime())
 {
 }
+Message::Message(const QString& id,
+                 const QString& senderId,
+                 const QString& conversationId,
+                 const QString& content,
+                 Type type,
+                 const QDateTime& timestamp)
+    : m_id(id),
+      m_senderId(senderId),
+      m_conversationId(conversationId),
+      m_content(content),
+      m_type(type),
+      m_timestamp(timestamp)
+{
+}
 
 QString Message::id() const
 {

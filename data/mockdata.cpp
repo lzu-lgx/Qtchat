@@ -26,26 +26,28 @@ QList<Conversation> MockData::createConversations()
 {
     QList<Conversation> conversations;
 
+    QDateTime now = QDateTime::currentDateTime();
+
     Conversation conv1("conv_001",
                        "张三",
-                       ":/avatars/zhangsan.png");
-
-    conv1.setLastMessage("明天几点见？");
-    conv1.setLastMessageTime(QDateTime::currentDateTime());
+                       ":/avatars/zhangsan.png",
+                       Conversation::Type::PrivateChat,
+                       "明天几点见？",
+                       now);
 
     Conversation conv2("conv_002",
                        "李四",
-                       ":/avatars/lisi.png");
-
-    conv2.setLastMessage("文件我已经收到了");
-    conv2.setLastMessageTime(QDateTime::currentDateTime());
+                       ":/avatars/lisi.png",
+                       Conversation::Type::PrivateChat,
+                       "文件我已经收到了",
+                       now);
 
     Conversation conv3("conv_ai",
                        "AI 助手",
-                       ":/avatars/ai.png");
-
-    conv3.setLastMessage("你好，我可以帮你学习 C++ 和 Qt");
-    conv3.setLastMessageTime(QDateTime::currentDateTime());
+                       ":/avatars/ai.png",
+                       Conversation::Type::AiAssistant,
+                       "你好，我可以帮你学习 C++ 和 Qt",
+                       now);
 
     conversations.append(conv1);
     conversations.append(conv2);

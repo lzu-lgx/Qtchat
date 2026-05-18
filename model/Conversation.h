@@ -11,28 +11,41 @@
 class Conversation
 {
 public:
+    enum class Type
+    {
+        PrivateChat,
+        AiAssistant,
+        GroupChat
+    };
+
     Conversation();
 
     Conversation(const QString& id,
                  const QString& title,
-                 const QString& avatarPath);
-
+                 const QString& avatarPath,
+                 Type type,
+                 const QString& lastMessage,
+                 const QDateTime& updatedAt);
+    
     QString id() const;
     QString title() const;
     QString avatarPath() const;
-
+    Type type() const;
     QString lastMessage() const;
-    QDateTime lastMessageTime() const;
+    QDateTime updatedAt() const;
+
 
     void setLastMessage(const QString& message);
-    void setLastMessageTime(const QDateTime& time);
+    void setUpdatedAt(const QDateTime& time);
 
 private:
     QString m_id;
     QString m_title;
     QString m_avatarPath;
+    Type m_type;
     QString m_lastMessage;
-    QDateTime m_lastMessageTime;
+    QDateTime m_updatedAt;
+    
 };
 
 #endif // CONVERSATION_H

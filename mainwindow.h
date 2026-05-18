@@ -10,6 +10,7 @@
 
 #include "model/Conversation.h"
 #include "model/Message.h"
+#include "database/DatabaseManager.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -40,6 +41,7 @@ private:
     QTextEdit *m_messageDisplay;
     QLineEdit *m_messageInput;
     QPushButton *m_sendButton;
+    DatabaseManager m_dbManager;
 
     QList<Conversation> m_conversations;
     QList<Message> m_messages;

@@ -9,6 +9,9 @@
 #include <QListWidgetItem>
 #include <QDateTime>
 #include <QDebug>
+#include "database/DatabaseManager.h"
+#include "model/Conversation.h"
+#include "model/Message.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -21,8 +24,12 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
 
+    if (m_dbManager.openDatabase()) {
+        m_dbManager.initTables();
+    }
+
     setupChatUi();
-    loadMockData();
+    
     loadConversations();
 
     if (!m_conversations.isEmpty())
@@ -76,10 +83,12 @@ void MainWindow::setupChatUi()
     mainLayout->addWidget(chatWidget);
 
     connect(m_conversationList, &QListWidget::itemClicked,
-            this, [this](QListWidgetItem *item)
+        this, [this](QListWidgetItem *item)
             {
                 QString conversationId = item->data(Qt::UserRole).toString();
-                m_chatTitleLabel->setText(item->text());
+
+                QString title = item->text().split('\n').first();
+                m_chatTitleLabel->setText(title);
                 showMessagesForConversation(conversationId);
             });
     connect(m_sendButton, &QPushButton::clicked,
@@ -104,6 +113,8 @@ void MainWindow::loadMockData()
 
 void MainWindow::loadConversations()
 {
+    m_conversations = m_dbManager.loadConversations();
+
     m_conversationList->clear();
 
     for (const Conversation& conversation : m_conversations)
@@ -119,24 +130,21 @@ void MainWindow::loadConversations()
 
 void MainWindow::showMessagesForConversation(const QString& conversationId)
 {
+    m_messages = m_dbManager.loadMessages(conversationId);
+
     m_messageDisplay->clear();
 
-    for (const Message& message : m_messages)
-    {
-        if (message.conversationId() == conversationId)
-        {
-            QString sender = message.senderId();
+    QString text;
 
-            if (sender == "me")
-            {
-                sender = "我";
-            }
+    for (const Message& message : m_messages) {
+        QString senderName = message.senderId() == "me" ? "我" : message.senderId();
+        QString timeText = message.timestamp().toString("yyyy-MM-dd hh:mm:ss");
 
-            QString line = sender + "： " + message.content();
-
-            m_messageDisplay->append(line);
-        }
+        text += senderName + "  " + timeText + "\n";
+        text += message.content() + "\n\n";
     }
+
+    m_messageDisplay->setText(text);
 }
 
 void MainWindow::sendCurrentMessage()
@@ -163,9 +171,20 @@ void MainWindow::sendCurrentMessage()
         Message::Type::Text
     );
 
-    m_messages.append(message);
+    
+    if (!m_dbManager.saveMessage(message)) {
+        return;
+    }
+
+    if (!m_dbManager.updateConversationLastMessage(
+            conversationId,
+            content,
+            message.timestamp())) {
+        return;
+    }
 
     showMessagesForConversation(conversationId);
+    loadConversations();
 
     m_messageInput->clear();
 }

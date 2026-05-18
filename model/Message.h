@@ -21,6 +21,12 @@ public:
             const QString& conversationId,
             const QString& content,
             Type type);
+    Message(const QString& id,
+            const QString& senderId,
+            const QString& conversationId,
+            const QString& content,
+            Type type,
+            const QDateTime& timestamp);
 
     QString id() const;
     QString senderId() const;
