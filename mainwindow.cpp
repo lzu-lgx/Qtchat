@@ -12,6 +12,7 @@
 #include "database/DatabaseManager.h"
 #include "model/Conversation.h"
 #include "model/Message.h"
+#include <QTextCursor>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -236,6 +237,8 @@ void MainWindow::showMessagesForConversation(const QString& conversationId)
     }
 
     m_messageDisplay->setText(text);
+
+    m_messageDisplay->moveCursor(QTextCursor::End);
 }
 
 void MainWindow::sendCurrentMessage()
@@ -276,6 +279,11 @@ void MainWindow::sendCurrentMessage()
     loadConversations();
 
     m_messageInput->clear();
+
+    if (conversationId == "conv_ai") {
+        showAiThinkingMessage();
+    }
+
     handleAiAssistantReply(conversationId, content);
 }
 
@@ -287,4 +295,21 @@ void MainWindow::handleAiAssistantReply(const QString& conversationId,
     }
 
     m_aiService.requestReply(conversationId, userMessage);
+}
+
+void MainWindow::showAiThinkingMessage()
+{
+    QString currentText = m_messageDisplay->toPlainText();
+
+    if (!currentText.isEmpty()) {
+        currentText += "\n";
+    }
+
+    QString timeText = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+
+    currentText += "AI 助手  " + timeText + "\n";
+    currentText += "正在思考中...\n";
+
+    m_messageDisplay->setText(currentText);
+    m_messageDisplay->moveCursor(QTextCursor::End);
 }

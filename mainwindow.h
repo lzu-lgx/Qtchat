@@ -34,6 +34,7 @@ private:
     void showMessagesForConversation(const QString& conversationId);
     void sendCurrentMessage();
     void handleAiAssistantReply(const QString& conversationId,const QString& userMessage);
+    void showAiThinkingMessage();
 
 private:
     Ui::MainWindow *ui;
