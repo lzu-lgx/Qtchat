@@ -27,6 +27,7 @@ public:
                  const QString& lastMessage,
                  const QDateTime& updatedAt);
     
+    
     QString id() const;
     QString title() const;
     QString avatarPath() const;

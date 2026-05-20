@@ -11,6 +11,7 @@
 #include "model/Conversation.h"
 #include "model/Message.h"
 #include "database/DatabaseManager.h"
+#include "service/AiService.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -32,6 +33,7 @@ private:
     void loadConversations();
     void showMessagesForConversation(const QString& conversationId);
     void sendCurrentMessage();
+    void handleAiAssistantReply(const QString& conversationId,const QString& userMessage);
 
 private:
     Ui::MainWindow *ui;
@@ -43,9 +45,11 @@ private:
     QPushButton *m_sendButton;
     DatabaseManager m_dbManager;
     QString m_currentConversationId;
+    AiService m_aiService;
 
     QList<Conversation> m_conversations;
     QList<Message> m_messages;
+    
 };
 
 #endif // MAINWINDOW_H

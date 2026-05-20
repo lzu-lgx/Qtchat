@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
 project(Qtchat LANGUAGES CXX)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Sql)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Sql Network)
 
 qt_standard_project_setup()
 
@@ -21,6 +21,8 @@ qt_add_executable(Qtchat
     data/MockData.cpp
     database/DatabaseManager.h
     database/DatabaseManager.cpp
+    service/AiService.h
+    service/AiService.cpp
 )
 
 target_link_libraries(Qtchat
@@ -28,6 +30,7 @@ target_link_libraries(Qtchat
         Qt::Core
         Qt::Widgets
         Qt::Sql
+        Qt::Network
 
         
 )

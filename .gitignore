@@ -5,3 +5,4 @@ build-*/
 .qtcreator/
 *.autosave
 .vscode/
+config.ini

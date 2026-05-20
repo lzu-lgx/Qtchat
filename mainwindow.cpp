@@ -21,6 +21,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_messageDisplay(nullptr)
     , m_messageInput(nullptr)
     , m_sendButton(nullptr)
+    , m_aiService()
 {
     ui->setupUi(this);
 
@@ -160,7 +161,19 @@ void MainWindow::showMessagesForConversation(const QString& conversationId)
     QString text;
 
     for (const Message& message : m_messages) {
-        QString senderName = message.senderId() == "me" ? "我" : message.senderId();
+        
+        QString senderName;
+        if (message.senderId() == "me") 
+        {
+            senderName = "我";
+        } else if (message.senderId() == "ai") 
+        {
+            senderName = "AI 助手";
+        } else 
+        {
+            senderName = message.senderId();
+        }
+        
         QString timeText = message.timestamp().toString("yyyy-MM-dd hh:mm:ss");
 
         text += senderName + "  " + timeText + "\n";
@@ -204,8 +217,38 @@ void MainWindow::sendCurrentMessage()
         return;
     }
 
+    handleAiAssistantReply(conversationId, content);
+
     showMessagesForConversation(conversationId);
     loadConversations();
 
     m_messageInput->clear();
+}
+
+void MainWindow::handleAiAssistantReply(const QString& conversationId,
+                                        const QString& userMessage)
+{
+    if (conversationId != "conv_ai") {
+        return;
+    }
+
+    QString aiReply = m_aiService.generateReply(userMessage);
+
+    Message aiMessage(
+        QString::number(QDateTime::currentMSecsSinceEpoch() + 1),
+        "ai",
+        conversationId,
+        aiReply,
+        Message::Type::Text
+    );
+
+    if (!m_dbManager.saveMessage(aiMessage)) {
+        return;
+    }
+
+    m_dbManager.updateConversationLastMessage(
+        conversationId,
+        aiReply,
+        aiMessage.timestamp()
+    );
 }
