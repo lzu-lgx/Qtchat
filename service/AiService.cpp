@@ -1,20 +1,19 @@
 #include "AiService.h"
 
-#include <QByteArray>
+#include <QCoreApplication>
 #include <QDebug>
-#include <QEventLoop>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
-#include <QProcessEnvironment>
-#include <QUrl>
-#include <QCoreApplication>
 #include <QSettings>
+#include <QUrl>
 
-AiService::AiService()
+AiService::AiService(QObject *parent)
+    : QObject(parent),
+      m_networkManager(new QNetworkAccessManager(this))
 {
 }
 
@@ -49,16 +48,16 @@ QString AiService::baseUrl() const
         .trimmed();
 }
 
-QString AiService::generateReply(const QString& userMessage) const
+void AiService::requestReply(const QString& conversationId,
+                             const QString& userMessage)
 {
     QString key = apiKey();
 
-    if (key.isEmpty())
-    {
-        return "DeepSeek API Key 未配置。请在程序运行目录下创建 config.ini，并填写 [DeepSeek] ApiKey。";
+    if (key.isEmpty()) {
+        emit replyFailed(conversationId,
+                         "DeepSeek API Key 未配置。请检查 config.ini。");
+        return;
     }
-
-    QNetworkAccessManager manager;
 
     QNetworkRequest request{QUrl(baseUrl())};
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
@@ -84,53 +83,64 @@ QString AiService::generateReply(const QString& userMessage) const
     QJsonDocument doc(body);
     QByteArray data = doc.toJson(QJsonDocument::Compact);
 
-    QNetworkReply *reply = manager.post(request, data);
+    QNetworkReply *reply = m_networkManager->post(request, data);
 
-    QEventLoop loop;
-    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    loop.exec();
+    connect(reply, &QNetworkReply::finished,
+            this, [this, reply, conversationId]()
+    {
+        if (reply->error() != QNetworkReply::NoError) {
+            QString errorText = reply->errorString();
+            QByteArray errorBody = reply->readAll();
 
-    if (reply->error() != QNetworkReply::NoError) {
-        QString errorText = reply->errorString();
-        QByteArray errorBody = reply->readAll();
+            qDebug() << "DeepSeek API request failed:" << errorText;
+            qDebug() << "HTTP status:"
+                     << reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            qDebug() << "Response body:" << errorBody;
 
-        qDebug() << "DeepSeek API request failed:" << errorText;
-        qDebug() << "HTTP status:"
-             << reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        qDebug() << "Response body:" << errorBody;
+            reply->deleteLater();
 
+            emit replyFailed(conversationId,
+                             "调用 DeepSeek API 失败：" + errorText);
+            return;
+        }
+
+        QByteArray responseData = reply->readAll();
         reply->deleteLater();
 
-        return "调用 DeepSeek API 失败：" + errorText;
-    }
+        QJsonParseError parseError;
+        QJsonDocument responseDoc = QJsonDocument::fromJson(responseData, &parseError);
 
-    QByteArray responseData = reply->readAll();
-    reply->deleteLater();
+        if (parseError.error != QJsonParseError::NoError) {
+            qDebug() << "Failed to parse DeepSeek response:"
+                     << parseError.errorString();
 
-    QJsonParseError parseError;
-    QJsonDocument responseDoc = QJsonDocument::fromJson(responseData, &parseError);
+            emit replyFailed(conversationId,
+                             "DeepSeek 返回内容解析失败。");
+            return;
+        }
 
-    if (parseError.error != QJsonParseError::NoError) {
-        qDebug() << "Failed to parse DeepSeek response:" << parseError.errorString();
-        return "DeepSeek 返回内容解析失败。";
-    }
+        QJsonObject responseObj = responseDoc.object();
+        QJsonArray choices = responseObj.value("choices").toArray();
 
-    QJsonObject responseObj = responseDoc.object();
-    QJsonArray choices = responseObj.value("choices").toArray();
+        if (choices.isEmpty()) {
+            qDebug() << "DeepSeek response has no choices:" << responseData;
 
-    if (choices.isEmpty()) {
-        qDebug() << "DeepSeek response has no choices:" << responseData;
-        return "DeepSeek 没有返回有效回复。";
-    }
+            emit replyFailed(conversationId,
+                             "DeepSeek 没有返回有效回复。");
+            return;
+        }
 
-    QJsonObject firstChoice = choices.first().toObject();
-    QJsonObject messageObj = firstChoice.value("message").toObject();
+        QJsonObject firstChoice = choices.first().toObject();
+        QJsonObject messageObj = firstChoice.value("message").toObject();
 
-    QString content = messageObj.value("content").toString().trimmed();
+        QString content = messageObj.value("content").toString().trimmed();
 
-    if (content.isEmpty()) {
-        return "DeepSeek 返回了空回复。";
-    }
+        if (content.isEmpty()) {
+            emit replyFailed(conversationId,
+                             "DeepSeek 返回了空回复。");
+            return;
+        }
 
-    return content;
+        emit replyReady(conversationId, content);
+    });
 }

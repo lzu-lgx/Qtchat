@@ -105,6 +105,61 @@ void MainWindow::setupChatUi()
                  sendCurrentMessage();
             });
 
+    connect(&m_aiService, &AiService::replyReady,
+        this, [this](const QString& conversationId,
+                     const QString& replyText)
+    {
+        Message aiMessage(
+        QString::number(QDateTime::currentMSecsSinceEpoch()),
+        "ai",
+        conversationId,
+        replyText,
+        Message::Type::Text
+        );
+
+        if (!m_dbManager.saveMessage(aiMessage)) {
+        return;
+        }
+
+        m_dbManager.updateConversationLastMessage(
+        conversationId,
+        replyText,
+        aiMessage.timestamp()
+        );
+
+        loadConversations();
+
+        if (m_currentConversationId == conversationId) {
+        showMessagesForConversation(conversationId);
+        }
+    });
+    connect(&m_aiService, &AiService::replyFailed,
+        this, [this](const QString& conversationId,
+                     const QString& errorText)
+    {
+        Message aiMessage(
+        QString::number(QDateTime::currentMSecsSinceEpoch()),
+        "ai",
+        conversationId,
+        errorText,
+        Message::Type::Text
+        );
+
+        m_dbManager.saveMessage(aiMessage);
+
+        m_dbManager.updateConversationLastMessage(
+        conversationId,
+        errorText,
+        aiMessage.timestamp()
+        );
+
+        loadConversations();
+
+        if (m_currentConversationId == conversationId) {
+        showMessagesForConversation(conversationId);
+        }
+    });
+
 }
 
 void MainWindow::loadMockData()
@@ -217,12 +272,11 @@ void MainWindow::sendCurrentMessage()
         return;
     }
 
-    handleAiAssistantReply(conversationId, content);
-
     showMessagesForConversation(conversationId);
     loadConversations();
 
     m_messageInput->clear();
+    handleAiAssistantReply(conversationId, content);
 }
 
 void MainWindow::handleAiAssistantReply(const QString& conversationId,
@@ -232,23 +286,5 @@ void MainWindow::handleAiAssistantReply(const QString& conversationId,
         return;
     }
 
-    QString aiReply = m_aiService.generateReply(userMessage);
-
-    Message aiMessage(
-        QString::number(QDateTime::currentMSecsSinceEpoch() + 1),
-        "ai",
-        conversationId,
-        aiReply,
-        Message::Type::Text
-    );
-
-    if (!m_dbManager.saveMessage(aiMessage)) {
-        return;
-    }
-
-    m_dbManager.updateConversationLastMessage(
-        conversationId,
-        aiReply,
-        aiMessage.timestamp()
-    );
+    m_aiService.requestReply(conversationId, userMessage);
 }
