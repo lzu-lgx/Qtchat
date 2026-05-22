@@ -35,6 +35,7 @@ private:
     void sendCurrentMessage();
     void handleAiAssistantReply(const QString& conversationId,const QString& userMessage);
     void showAiThinkingMessage();
+    void createNewConversation();
 
 private:
     Ui::MainWindow *ui;
@@ -44,6 +45,7 @@ private:
     QTextEdit *m_messageDisplay;
     QLineEdit *m_messageInput;
     QPushButton *m_sendButton;
+    QPushButton *m_newConversationButton;
     DatabaseManager m_dbManager;
     QString m_currentConversationId;
     AiService m_aiService;

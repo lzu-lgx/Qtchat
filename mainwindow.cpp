@@ -13,6 +13,7 @@
 #include "model/Conversation.h"
 #include "model/Message.h"
 #include <QTextCursor>
+#include <QInputDialog>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -22,6 +23,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_messageDisplay(nullptr)
     , m_messageInput(nullptr)
     , m_sendButton(nullptr)
+    ,m_newConversationButton(nullptr)
     , m_aiService()
 {
     ui->setupUi(this);
@@ -54,8 +56,13 @@ void MainWindow::setupChatUi()
 
     QHBoxLayout *mainLayout = new QHBoxLayout(central);
 
-    m_conversationList = new QListWidget(central);
-    m_conversationList->setFixedWidth(220);
+    QWidget *leftPanel = new QWidget(central);
+    leftPanel->setFixedWidth(220);
+    QVBoxLayout *leftLayout = new QVBoxLayout(leftPanel);
+
+    m_newConversationButton = new QPushButton("新建会话", leftPanel);
+    m_conversationList = new QListWidget(leftPanel);
+    
 
     QWidget *chatWidget = new QWidget(central);
     QVBoxLayout *chatLayout = new QVBoxLayout(chatWidget);
@@ -80,8 +87,10 @@ void MainWindow::setupChatUi()
     chatLayout->addWidget(m_chatTitleLabel);
     chatLayout->addWidget(m_messageDisplay);
     chatLayout->addWidget(inputWidget);
+    leftLayout->addWidget(m_newConversationButton);
+    leftLayout->addWidget(m_conversationList);
 
-    mainLayout->addWidget(m_conversationList);
+    mainLayout->addWidget(leftPanel);
     mainLayout->addWidget(chatWidget);
 
     connect(m_conversationList, &QListWidget::itemClicked,
@@ -104,6 +113,11 @@ void MainWindow::setupChatUi()
             this, [this]()
             {
                  sendCurrentMessage();
+            });
+    connect(m_newConversationButton, &QPushButton::clicked,
+        this, [this]()
+            {
+                createNewConversation();
             });
 
     connect(&m_aiService, &AiService::replyReady,
@@ -312,4 +326,44 @@ void MainWindow::showAiThinkingMessage()
 
     m_messageDisplay->setText(currentText);
     m_messageDisplay->moveCursor(QTextCursor::End);
+}
+void MainWindow::createNewConversation()
+{
+    bool ok = false;
+
+    QString title = QInputDialog::getText(
+        this,
+        "新建会话",
+        "请输入会话名称：",
+        QLineEdit::Normal,
+        "",
+        &ok
+    ).trimmed();
+
+    if (!ok || title.isEmpty()) {
+        return;
+    }
+
+    QString conversationId =
+        "conv_" + QString::number(QDateTime::currentMSecsSinceEpoch());
+
+    Conversation conversation(
+        conversationId,
+        title,
+        ":/avatars/default.png",
+        Conversation::Type::PrivateChat,
+        "",
+        QDateTime::currentDateTime()
+    );
+
+    if (!m_dbManager.saveConversation(conversation)) {
+        return;
+    }
+
+    m_currentConversationId = conversationId;
+
+    loadConversations();
+
+    m_chatTitleLabel->setText(title);
+    showMessagesForConversation(conversationId);
 }
