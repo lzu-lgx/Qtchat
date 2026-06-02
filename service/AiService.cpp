@@ -1,4 +1,5 @@
 #include "AiService.h"
+#include "../config/AppConfig.h"
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -19,33 +20,20 @@ AiService::AiService(QObject *parent)
 
 QString AiService::apiKey() const
 {
-    QString configPath = QCoreApplication::applicationDirPath() + "/config.ini";
-
-    QSettings settings(configPath, QSettings::IniFormat);
-
-    return settings.value("DeepSeek/ApiKey").toString().trimmed();
+    return AppConfig::value("DeepSeek/ApiKey");
 }
+
 QString AiService::model() const
 {
-    QString configPath = QCoreApplication::applicationDirPath() + "/config.ini";
-
-    QSettings settings(configPath, QSettings::IniFormat);
-
-    return settings.value("DeepSeek/Model", "deepseek-v4-flash")
-        .toString()
-        .trimmed();
+    return AppConfig::value("DeepSeek/Model", "deepseek-v4-flash");
 }
 
 QString AiService::baseUrl() const
 {
-    QString configPath = QCoreApplication::applicationDirPath() + "/config.ini";
-
-    QSettings settings(configPath, QSettings::IniFormat);
-
-    return settings.value("DeepSeek/BaseUrl",
-                          "https://api.deepseek.com/chat/completions")
-        .toString()
-        .trimmed();
+    return AppConfig::value(
+        "DeepSeek/BaseUrl",
+        "https://api.deepseek.com/chat/completions"
+    );
 }
 
 void AiService::requestReply(const QString& conversationId,

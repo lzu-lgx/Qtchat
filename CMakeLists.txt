@@ -23,6 +23,15 @@ qt_add_executable(Qtchat
     database/DatabaseManager.cpp
     service/AiService.h
     service/AiService.cpp
+    network/NetworkClient.h
+    network/NetworkClient.cpp
+    config/AppConfig.h
+    config/AppConfig.cpp
+)
+qt_add_executable(ChatServer
+    server/main.cpp
+    server/ChatServer.h
+    server/ChatServer.cpp
 )
 
 target_link_libraries(Qtchat
@@ -33,6 +42,11 @@ target_link_libraries(Qtchat
         Qt::Network
 
         
+)
+target_link_libraries(ChatServer
+    PRIVATE
+        Qt::Core
+        Qt::Network
 )
 
 install(TARGETS Qtchat

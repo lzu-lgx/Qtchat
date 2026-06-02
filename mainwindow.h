@@ -12,6 +12,9 @@
 #include "model/Message.h"
 #include "database/DatabaseManager.h"
 #include "service/AiService.h"
+#include "network/NetworkClient.h"
+#include "config/AppConfig.h"
+#include <QJsonObject>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -36,6 +39,16 @@ private:
     void handleAiAssistantReply(const QString& conversationId,const QString& userMessage);
     void showAiThinkingMessage();
     void createNewConversation();
+    void setupNetwork();
+
+    void loadClientConfig();
+    void handleJsonNetworkMessage(const QJsonObject& json);
+    QString conversationIdForPeer(const QString& peerId) const;
+
+    QString m_userId;
+    QString m_userName;
+    QString m_peerId;
+    QString m_peerName;
 
 private:
     Ui::MainWindow *ui;
@@ -49,6 +62,7 @@ private:
     DatabaseManager m_dbManager;
     QString m_currentConversationId;
     AiService m_aiService;
+    NetworkClient m_networkClient;
 
     QList<Conversation> m_conversations;
     QList<Message> m_messages;

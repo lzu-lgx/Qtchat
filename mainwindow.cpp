@@ -14,6 +14,7 @@
 #include "model/Message.h"
 #include <QTextCursor>
 #include <QInputDialog>
+#include <QJsonObject>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -24,17 +25,29 @@ MainWindow::MainWindow(QWidget *parent)
     , m_messageInput(nullptr)
     , m_sendButton(nullptr)
     ,m_newConversationButton(nullptr)
+    , m_currentConversationId()
+    , m_dbManager()
     , m_aiService()
+    , m_networkClient()
+    , m_userId()
+    , m_userName()
+    , m_peerId()
+    , m_peerName()
 {
     ui->setupUi(this);
+
+    loadClientConfig();
 
     if (m_dbManager.openDatabase()) {
         m_dbManager.initTables();
     }
 
     setupChatUi();
-    
     loadConversations();
+    setupNetwork();
+
+
+    
 
     if (!m_conversations.isEmpty())
     {
@@ -42,6 +55,8 @@ MainWindow::MainWindow(QWidget *parent)
         showMessagesForConversation(m_conversations.first().id());
         m_chatTitleLabel->setText(m_conversations.first().title());
     }
+
+    
 }
 
 MainWindow::~MainWindow()
@@ -236,9 +251,12 @@ void MainWindow::showMessagesForConversation(const QString& conversationId)
         if (message.senderId() == "me") 
         {
             senderName = "我";
-        } else if (message.senderId() == "ai") 
+        } else if (message.senderId() == "ai")
         {
             senderName = "AI 助手";
+        } else if (message.senderId() == m_peerId) 
+        {
+            senderName = m_peerName;
         } else 
         {
             senderName = message.senderId();
@@ -289,6 +307,17 @@ void MainWindow::sendCurrentMessage()
         return;
     }
 
+    QJsonObject json;
+    json["type"] = "chat_message";
+    json["sender_id"] = m_userId;
+    json["sender_name"] = m_userName;
+    json["receiver_id"] = m_peerId;
+    json["receiver_name"] = m_peerName;
+    json["content"] = content;
+    json["timestamp"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+    m_networkClient.sendJsonMessage(json);
+
     showMessagesForConversation(conversationId);
     loadConversations();
 
@@ -329,23 +358,13 @@ void MainWindow::showAiThinkingMessage()
 }
 void MainWindow::createNewConversation()
 {
-    bool ok = false;
-
-    QString title = QInputDialog::getText(
-        this,
-        "新建会话",
-        "请输入会话名称：",
-        QLineEdit::Normal,
-        "",
-        &ok
-    ).trimmed();
-
-    if (!ok || title.isEmpty()) {
+    if (m_peerId.isEmpty()) {
+        qDebug() << "Cannot create conversation: peer id is empty";
         return;
     }
 
-    QString conversationId =
-        "conv_" + QString::number(QDateTime::currentMSecsSinceEpoch());
+    QString conversationId = conversationIdForPeer(m_peerId);
+    QString title = m_peerName.isEmpty() ? m_peerId : m_peerName;
 
     Conversation conversation(
         conversationId,
@@ -366,4 +385,136 @@ void MainWindow::createNewConversation()
 
     m_chatTitleLabel->setText(title);
     showMessagesForConversation(conversationId);
+}
+
+void MainWindow::setupNetwork()
+{
+    connect(&m_networkClient, &NetworkClient::connected,
+            this, [this]()
+    {
+        qDebug() << "MainWindow received connected signal";
+    });
+
+    connect(&m_networkClient, &NetworkClient::messageReceived,
+            this, [this](const QString& message)
+    {
+        qDebug() << "MainWindow received network message:" << message;
+    });
+
+    connect(&m_networkClient, &NetworkClient::jsonMessageReceived,
+        this, [this](const QJsonObject& message)
+    {
+        qDebug() << "MainWindow received JSON network message:" << message;
+        handleJsonNetworkMessage(message);
+    });
+
+    m_networkClient.connectToServer("127.0.0.1", 8888);
+}
+
+
+void MainWindow::loadClientConfig()
+{
+    m_userId = AppConfig::value("Client/UserId", "user_001");
+    m_userName = AppConfig::value("Client/UserName", "用户1");
+    m_peerId = AppConfig::value("Client/PeerId", "user_002");
+    m_peerName = AppConfig::value("Client/PeerName", "用户2");
+
+    setWindowTitle("Qtchat - " + m_userName + " (" + m_userId + ")");
+    
+    qDebug() << "Current client:"
+             << m_userId
+             << m_userName
+             << "peer:"
+             << m_peerId
+             << m_peerName;
+}
+
+QString MainWindow::conversationIdForPeer(const QString& peerId) const
+{
+    QString first = m_userId;
+    QString second = peerId;
+
+    if (first > second) {
+        std::swap(first, second);
+    }
+
+    return "conv_" + first + "_" + second;
+}
+
+void MainWindow::handleJsonNetworkMessage(const QJsonObject& json)
+{
+    QString type = json.value("type").toString();
+
+    if (type != "chat_message") {
+        qDebug() << "Unsupported network message type:" << type;
+        return;
+    }
+
+    QString senderId = json.value("sender_id").toString();
+    QString senderName = json.value("sender_name").toString();
+    QString receiverId = json.value("receiver_id").toString();
+    QString content = json.value("content").toString();
+    QString timestampText = json.value("timestamp").toString();
+
+    if (receiverId != m_userId) {
+        qDebug() << "Ignore message not for current user:"
+                 << "receiverId =" << receiverId
+                 << "currentUserId =" << m_userId;
+        return;
+    }
+
+    if (senderId.isEmpty() || content.isEmpty()) {
+        qDebug() << "Invalid chat message json:" << json;
+        return;
+    }
+
+    if (senderName.isEmpty()) {
+        senderName = senderId;
+    }
+
+    QString conversationId = conversationIdForPeer(senderId);
+
+    Conversation conversation(
+        conversationId,
+        senderName,
+        "",
+        Conversation::Type::PrivateChat,
+        content,
+        QDateTime::currentDateTime()
+    );
+
+    m_dbManager.saveConversation(conversation);
+
+    QDateTime timestamp = QDateTime::fromString(timestampText, Qt::ISODate);
+
+    if (!timestamp.isValid()) {
+        timestamp = QDateTime::currentDateTime();
+    }
+
+    Message receivedMessage(
+        QString::number(QDateTime::currentMSecsSinceEpoch()),
+        senderId,
+        conversationId,
+        content,
+        Message::Type::Text,
+        timestamp
+    );
+
+    if (!m_dbManager.saveMessage(receivedMessage)) {
+        return;
+    }
+
+    if (!m_dbManager.updateConversationLastMessage(
+            conversationId,
+            content,
+            receivedMessage.timestamp())) {
+        return;
+    }
+
+    loadConversations();
+
+    if (m_currentConversationId == conversationId) {
+        showMessagesForConversation(conversationId);
+        m_chatTitleLabel->setText(senderName);
+    }
 }

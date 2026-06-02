@@ -6,3 +6,6 @@ build-*/
 *.autosave
 .vscode/
 config.ini
+config_client*.ini
+chat_user_*.db
+chat.db

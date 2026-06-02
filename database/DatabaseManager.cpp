@@ -1,4 +1,5 @@
 #include "databasemanager.h"
+#include "../config/AppConfig.h"
 
 #include <QSqlDatabase>
 #include <QSqlQuery>
@@ -14,7 +15,11 @@ DatabaseManager::DatabaseManager()
 bool DatabaseManager::openDatabase()
 {
     QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE");
-    db.setDatabaseName("chat.db");
+
+    QString databaseName = AppConfig::value("Client/DatabaseName", "chat.db");
+    db.setDatabaseName(databaseName);
+
+    qDebug() << "Using database:" << databaseName;
 
     if (!db.open()) {
         qDebug() << "Failed to open database:" << db.lastError().text();
