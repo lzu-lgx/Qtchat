@@ -8,6 +8,7 @@
 #include <QHash>
 #include <QString>
 #include <QJsonObject>
+#include <QSqlDatabase>
 
 class ChatServer : public QObject
 {
@@ -19,17 +20,26 @@ public:
     bool startServer(quint16 port);
 
 private slots:
-    void broadcastMessage(QTcpSocket *senderSocket, const QByteArray& data);
     void handleNewConnection();
     void handleReadyRead();
-    void handleJsonMessage(QTcpSocket *clientSocket, const QJsonObject& json);
-    void handleClientRegister(QTcpSocket *clientSocket, const QJsonObject& json);
-    void forwardChatMessage(const QJsonObject& json);
 
 private:
+    bool initDatabase();
+
+    void handleJsonMessage(QTcpSocket *clientSocket, const QJsonObject& json);
+    void handleClientRegister(QTcpSocket *clientSocket, const QJsonObject& json);
+    void handleChatMessage(const QJsonObject& json);
+
+    bool saveChatMessage(QJsonObject& json);
+    bool forwardChatMessage(const QJsonObject& json);
+    void deliverOfflineMessages(const QString& userId);
+    void markMessageDelivered(const QString& messageId);
+
     QTcpServer *m_server;
     QList<QTcpSocket*> m_clients;
     QHash<QString, QTcpSocket*> m_userSockets;
+
+    QSqlDatabase m_db;
 };
 
 #endif // CHATSERVER_H

@@ -9,3 +9,4 @@ config.ini
 config_client*.ini
 chat_user_*.db
 chat.db
+chat_server.db

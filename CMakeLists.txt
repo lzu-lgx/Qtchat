@@ -47,6 +47,7 @@ target_link_libraries(ChatServer
     PRIVATE
         Qt::Core
         Qt::Network
+        Qt::Sql
 )
 
 install(TARGETS Qtchat
