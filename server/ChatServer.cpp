@@ -2,6 +2,9 @@
 
 #include <QDebug>
 #include <QHostAddress>
+#include <QJsonDocument>
+#include <QJsonParseError>
+#include <QJsonObject>
 
 ChatServer::ChatServer(QObject *parent)
     : QObject(parent),
@@ -40,13 +43,30 @@ void ChatServer::handleNewConnection()
         this, &ChatServer::handleReadyRead);
 
     connect(clientSocket, &QTcpSocket::disconnected,
-            this, [this, clientSocket]()
+        this, [this, clientSocket]()
     {
         qDebug() << "Client disconnected:"
                  << clientSocket->peerAddress().toString()
                  << clientSocket->peerPort();
 
         m_clients.removeAll(clientSocket);
+
+        QString userIdToRemove;
+
+        for (auto it = m_userSockets.begin(); it != m_userSockets.end(); ++it) 
+        {
+            if (it.value() == clientSocket) {
+                userIdToRemove = it.key();
+                break;
+            }
+        }
+
+        if (!userIdToRemove.isEmpty()) 
+        {
+            m_userSockets.remove(userIdToRemove);
+            qDebug() << "Removed user socket mapping:" << userIdToRemove;
+        }
+
         clientSocket->deleteLater();
     });
 }
@@ -60,18 +80,28 @@ void ChatServer::handleReadyRead()
     }
 
     while (clientSocket->canReadLine()) {
-        QByteArray line = clientSocket->readLine();
+        QByteArray line = clientSocket->readLine().trimmed();
 
-        if (line.trimmed().isEmpty()) {
+        if (line.isEmpty()) {
             continue;
         }
 
         qDebug() << "Received message from client:"
                  << clientSocket->peerAddress().toString()
                  << clientSocket->peerPort()
-                 << line.trimmed();
+                 << line;
 
-        broadcastMessage(clientSocket, line);
+        QJsonParseError parseError;
+        QJsonDocument doc = QJsonDocument::fromJson(line, &parseError);
+
+        if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+            qDebug() << "Invalid JSON from client:" << parseError.errorString();
+            continue;
+        }
+
+        QJsonObject json = doc.object();
+
+        handleJsonMessage(clientSocket, json);
     }
 }
 
@@ -89,4 +119,69 @@ void ChatServer::broadcastMessage(QTcpSocket *senderSocket, const QByteArray& da
     }
 
     qDebug() << "Broadcast message to other clients";
+}
+
+void ChatServer::handleJsonMessage(QTcpSocket *clientSocket,
+                                   const QJsonObject& json)
+{
+    QString type = json.value("type").toString();
+
+    if (type == "client_register") {
+        handleClientRegister(clientSocket, json);
+        return;
+    }
+
+    if (type == "chat_message") {
+        forwardChatMessage(json);
+        return;
+    }
+
+    qDebug() << "Unsupported message type:" << type;
+}
+
+void ChatServer::handleClientRegister(QTcpSocket *clientSocket,
+                                      const QJsonObject& json)
+{
+    QString userId = json.value("user_id").toString();
+    QString userName = json.value("user_name").toString();
+
+    if (userId.isEmpty()) {
+        qDebug() << "Client register failed: empty user_id";
+        return;
+    }
+
+    m_userSockets[userId] = clientSocket;
+
+    qDebug() << "Client registered:"
+             << userId
+             << userName
+             << clientSocket->peerAddress().toString()
+             << clientSocket->peerPort();
+}
+
+void ChatServer::forwardChatMessage(const QJsonObject& json)
+{
+    QString receiverId = json.value("receiver_id").toString();
+
+    if (receiverId.isEmpty()) {
+        qDebug() << "Cannot forward chat message: empty receiver_id";
+        return;
+    }
+
+    QTcpSocket *targetSocket = m_userSockets.value(receiverId, nullptr);
+
+    if (!targetSocket ||
+        targetSocket->state() != QAbstractSocket::ConnectedState) {
+        qDebug() << "Receiver not online:" << receiverId;
+        return;
+    }
+
+    QJsonDocument doc(json);
+    QByteArray data = doc.toJson(QJsonDocument::Compact);
+    data.append('\n');
+
+    targetSocket->write(data);
+    targetSocket->flush();
+
+    qDebug() << "Forwarded chat message to:" << receiverId;
 }

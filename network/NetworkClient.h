@@ -17,6 +17,7 @@ public:
     bool isConnected() const;
     void sendTextMessage(const QString& text);
     void sendJsonMessage(const QJsonObject& message);
+    void registerClient(const QString& userId, const QString& userName);
 
 signals:
     void connected();

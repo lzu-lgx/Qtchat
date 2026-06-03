@@ -40,6 +40,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     if (m_dbManager.openDatabase()) {
         m_dbManager.initTables();
+        ensureAiConversation();
     }
 
     setupChatUi();
@@ -295,7 +296,6 @@ void MainWindow::sendCurrentMessage()
         Message::Type::Text
     );
 
-    
     if (!m_dbManager.saveMessage(message)) {
         return;
     }
@@ -307,17 +307,6 @@ void MainWindow::sendCurrentMessage()
         return;
     }
 
-    QJsonObject json;
-    json["type"] = "chat_message";
-    json["sender_id"] = m_userId;
-    json["sender_name"] = m_userName;
-    json["receiver_id"] = m_peerId;
-    json["receiver_name"] = m_peerName;
-    json["content"] = content;
-    json["timestamp"] = QDateTime::currentDateTime().toString(Qt::ISODate);
-
-    m_networkClient.sendJsonMessage(json);
-
     showMessagesForConversation(conversationId);
     loadConversations();
 
@@ -325,9 +314,10 @@ void MainWindow::sendCurrentMessage()
 
     if (conversationId == "conv_ai") {
         showAiThinkingMessage();
+        handleAiAssistantReply(conversationId, content);
+    } else {
+        sendNetworkChatMessage(content);
     }
-
-    handleAiAssistantReply(conversationId, content);
 }
 
 void MainWindow::handleAiAssistantReply(const QString& conversationId,
@@ -393,6 +383,7 @@ void MainWindow::setupNetwork()
             this, [this]()
     {
         qDebug() << "MainWindow received connected signal";
+        m_networkClient.registerClient(m_userId, m_userName);
     });
 
     connect(&m_networkClient, &NetworkClient::messageReceived,
@@ -517,4 +508,40 @@ void MainWindow::handleJsonNetworkMessage(const QJsonObject& json)
         showMessagesForConversation(conversationId);
         m_chatTitleLabel->setText(senderName);
     }
+}
+
+void MainWindow::sendNetworkChatMessage(const QString& content)
+{
+    QJsonObject json;
+    json["type"] = "chat_message";
+    json["sender_id"] = m_userId;
+    json["sender_name"] = m_userName;
+    json["receiver_id"] = m_peerId;
+    json["receiver_name"] = m_peerName;
+    json["content"] = content;
+    json["timestamp"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+    m_networkClient.sendJsonMessage(json);
+}
+
+void MainWindow::ensureAiConversation()
+{
+    QList<Conversation> conversations = m_dbManager.loadConversations();
+
+    for (const Conversation& conversation : conversations) {
+        if (conversation.id() == "conv_ai") {
+            return;
+        }
+    }
+
+    Conversation aiConversation(
+        "conv_ai",
+        "AI 助手",
+        "",
+        Conversation::Type::AiAssistant,
+        "你好，我是 AI 助手",
+        QDateTime::currentDateTime()
+    );
+
+    m_dbManager.saveConversation(aiConversation);
 }

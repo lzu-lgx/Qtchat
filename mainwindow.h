@@ -36,6 +36,7 @@ private:
     void loadConversations();
     void showMessagesForConversation(const QString& conversationId);
     void sendCurrentMessage();
+    void sendNetworkChatMessage(const QString& content);
     void handleAiAssistantReply(const QString& conversationId,const QString& userMessage);
     void showAiThinkingMessage();
     void createNewConversation();
@@ -44,6 +45,7 @@ private:
     void loadClientConfig();
     void handleJsonNetworkMessage(const QJsonObject& json);
     QString conversationIdForPeer(const QString& peerId) const;
+    void ensureAiConversation();
 
     QString m_userId;
     QString m_userName;

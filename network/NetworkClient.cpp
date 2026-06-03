@@ -111,3 +111,13 @@ void NetworkClient::sendJsonMessage(const QJsonObject& message)
 
     qDebug() << "Sent JSON message to server:" << data;
 }
+
+void NetworkClient::registerClient(const QString& userId, const QString& userName)
+{
+    QJsonObject json;
+    json["type"] = "client_register";
+    json["user_id"] = userId;
+    json["user_name"] = userName;
+
+    sendJsonMessage(json);
+}
