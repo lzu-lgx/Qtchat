@@ -121,3 +121,12 @@ void NetworkClient::registerClient(const QString& userId, const QString& userNam
 
     sendJsonMessage(json);
 }
+
+void NetworkClient::requestContacts(const QString& userId)
+{
+    QJsonObject json;
+    json["type"] = "get_contacts";
+    json["user_id"] = userId;
+
+    sendJsonMessage(json);
+}

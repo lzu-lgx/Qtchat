@@ -25,9 +25,14 @@ private slots:
 
 private:
     bool initDatabase();
+    bool initDefaultData();
+    QString privateConversationIdForUsers(const QString& userId1,const QString& userId2) const;
 
     void handleJsonMessage(QTcpSocket *clientSocket, const QJsonObject& json);
     void handleClientRegister(QTcpSocket *clientSocket, const QJsonObject& json);
+    
+    void handleGetContacts(QTcpSocket *clientSocket, const QJsonObject& json);
+    void sendContactsResult(QTcpSocket *clientSocket,const QString& userId);
     void handleChatMessage(const QJsonObject& json);
 
     bool saveChatMessage(QJsonObject& json);

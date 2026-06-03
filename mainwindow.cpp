@@ -348,18 +348,20 @@ void MainWindow::showAiThinkingMessage()
 }
 void MainWindow::createNewConversation()
 {
-    if (m_peerId.isEmpty()) {
-        qDebug() << "Cannot create conversation: peer id is empty";
+    Contact contact = selectContact();
+
+    if (contact.userId().isEmpty()) {
+        qDebug() << "Create conversation canceled or no contact selected";
         return;
     }
 
-    QString conversationId = conversationIdForPeer(m_peerId);
-    QString title = m_peerName.isEmpty() ? m_peerId : m_peerName;
+    QString conversationId = conversationIdForPeer(contact.userId());
+    QString title = contact.userName();
 
     Conversation conversation(
         conversationId,
         title,
-        ":/avatars/default.png",
+        contact.avatarPath(),
         Conversation::Type::PrivateChat,
         "",
         QDateTime::currentDateTime()
@@ -384,6 +386,7 @@ void MainWindow::setupNetwork()
     {
         qDebug() << "MainWindow received connected signal";
         m_networkClient.registerClient(m_userId, m_userName);
+        m_networkClient.requestContacts(m_userId);
     });
 
     connect(&m_networkClient, &NetworkClient::messageReceived,
@@ -396,7 +399,22 @@ void MainWindow::setupNetwork()
         this, [this](const QJsonObject& message)
     {
         qDebug() << "MainWindow received JSON network message:" << message;
-        handleJsonNetworkMessage(message);
+
+        QString type = message.value("type").toString();
+
+        if (type == "contacts_result") 
+        {
+            handleContactsResult(message);
+            return;
+        }
+
+        if (type == "chat_message")
+        {
+            handleJsonNetworkMessage(message);
+            return;
+        }
+
+        qDebug() << "Unsupported JSON message type in MainWindow:" << type;
     });
 
     m_networkClient.connectToServer("127.0.0.1", 8888);
@@ -463,7 +481,12 @@ void MainWindow::handleJsonNetworkMessage(const QJsonObject& json)
         senderName = senderId;
     }
 
-    QString conversationId = conversationIdForPeer(senderId);
+    QString conversationId = json.value("conversation_id").toString();
+
+    if (conversationId.isEmpty()) 
+    {
+        conversationId = conversationIdForPeer(senderId);
+    }
 
     Conversation conversation(
         conversationId,
@@ -514,6 +537,7 @@ void MainWindow::sendNetworkChatMessage(const QString& content)
 {
     QJsonObject json;
     json["type"] = "chat_message";
+    json["conversation_id"] = m_currentConversationId;
     json["sender_id"] = m_userId;
     json["sender_name"] = m_userName;
     json["receiver_id"] = m_peerId;
@@ -544,4 +568,88 @@ void MainWindow::ensureAiConversation()
     );
 
     m_dbManager.saveConversation(aiConversation);
+}
+
+void MainWindow::handleContactsResult(const QJsonObject& json)
+{
+    QString userId = json.value("user_id").toString();
+
+    if (userId != m_userId) {
+        qDebug() << "Ignore contacts result for another user:"
+                 << userId
+                 << "current:" << m_userId;
+        return;
+    }
+
+    QJsonArray contactsArray = json.value("contacts").toArray();
+
+    m_contacts.clear();
+
+    for (const QJsonValue& value : contactsArray) {
+        if (!value.isObject()) {
+            continue;
+        }
+
+        QJsonObject obj = value.toObject();
+
+        QString contactId = obj.value("user_id").toString();
+        QString contactName = obj.value("user_name").toString();
+        QString avatarPath = obj.value("avatar_path").toString();
+
+        if (contactId.isEmpty()) {
+            continue;
+        }
+
+        if (contactName.isEmpty()) {
+            contactName = contactId;
+        }
+
+        m_contacts.append(Contact(contactId, contactName, avatarPath));
+    }
+
+    qDebug() << "Contacts loaded from server:" << m_contacts.size();
+
+    for (const Contact& contact : m_contacts) {
+        qDebug() << "Contact:"
+                 << contact.userId()
+                 << contact.userName();
+    }
+}
+
+Contact MainWindow::selectContact()
+{
+    if (m_contacts.isEmpty()) {
+        qDebug() << "No contacts available";
+        return Contact();
+    }
+
+    QStringList contactNames;
+
+    for (const Contact& contact : m_contacts) {
+        contactNames.append(contact.userName() + " (" + contact.userId() + ")");
+    }
+
+    bool ok = false;
+
+    QString selected = QInputDialog::getItem(
+        this,
+        "选择联系人",
+        "请选择要聊天的联系人：",
+        contactNames,
+        0,
+        false,
+        &ok
+    );
+
+    if (!ok || selected.isEmpty()) {
+        return Contact();
+    }
+
+    int index = contactNames.indexOf(selected);
+
+    if (index < 0 || index >= m_contacts.size()) {
+        return Contact();
+    }
+
+    return m_contacts.at(index);
 }

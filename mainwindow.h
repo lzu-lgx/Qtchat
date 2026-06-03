@@ -15,6 +15,9 @@
 #include "network/NetworkClient.h"
 #include "config/AppConfig.h"
 #include <QJsonObject>
+#include <QJsonArray>
+#include "model/Contact.h"
+#include <QList>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -44,8 +47,10 @@ private:
 
     void loadClientConfig();
     void handleJsonNetworkMessage(const QJsonObject& json);
+    void handleContactsResult(const QJsonObject& json);
     QString conversationIdForPeer(const QString& peerId) const;
     void ensureAiConversation();
+    Contact selectContact();
 
     QString m_userId;
     QString m_userName;
@@ -68,6 +73,7 @@ private:
 
     QList<Conversation> m_conversations;
     QList<Message> m_messages;
+    QList<Contact> m_contacts;
     
 };
 

@@ -9,6 +9,8 @@
 #include <QDateTime>
 #include <QUuid>
 #include <QAbstractSocket>
+#include <QJsonObject>
+#include <QJsonArray>
 
 ChatServer::ChatServer(QObject *parent)
     : QObject(parent),
@@ -22,6 +24,10 @@ ChatServer::ChatServer(QObject *parent)
 bool ChatServer::startServer(quint16 port)
 {
     if (!initDatabase()) {
+        return false;
+    }
+
+    if (!initDefaultData()) {
         return false;
     }
 
@@ -45,19 +51,86 @@ bool ChatServer::initDatabase()
 
     QSqlQuery query(m_db);
 
-    QString sql =
+    QString createUsersTable =
+        "CREATE TABLE IF NOT EXISTS users ("
+        "id TEXT PRIMARY KEY,"
+        "username TEXT NOT NULL UNIQUE,"
+        "password_hash TEXT,"
+        "avatar_path TEXT,"
+        "created_at TEXT NOT NULL"
+        ")";
+
+    if (!query.exec(createUsersTable)) {
+        qDebug() << "Failed to create users table:"
+                 << query.lastError().text();
+        return false;
+    }
+
+    QString createFriendshipsTable =
+        "CREATE TABLE IF NOT EXISTS friendships ("
+        "id TEXT PRIMARY KEY,"
+        "user_id TEXT NOT NULL,"
+        "friend_id TEXT NOT NULL,"
+        "created_at TEXT NOT NULL,"
+        "UNIQUE(user_id, friend_id),"
+        "FOREIGN KEY(user_id) REFERENCES users(id),"
+        "FOREIGN KEY(friend_id) REFERENCES users(id)"
+        ")";
+
+    if (!query.exec(createFriendshipsTable)) {
+        qDebug() << "Failed to create friendships table:"
+                 << query.lastError().text();
+        return false;
+    }
+
+    QString createConversationsTable =
+        "CREATE TABLE IF NOT EXISTS conversations ("
+        "id TEXT PRIMARY KEY,"
+        "type INTEGER NOT NULL,"
+        "title TEXT,"
+        "created_at TEXT NOT NULL,"
+        "updated_at TEXT NOT NULL"
+        ")";
+
+    if (!query.exec(createConversationsTable)) {
+        qDebug() << "Failed to create conversations table:"
+                 << query.lastError().text();
+        return false;
+    }
+
+    QString createConversationMembersTable =
+        "CREATE TABLE IF NOT EXISTS conversation_members ("
+        "id TEXT PRIMARY KEY,"
+        "conversation_id TEXT NOT NULL,"
+        "user_id TEXT NOT NULL,"
+        "joined_at TEXT NOT NULL,"
+        "is_hidden INTEGER NOT NULL DEFAULT 0,"
+        "UNIQUE(conversation_id, user_id),"
+        "FOREIGN KEY(conversation_id) REFERENCES conversations(id),"
+        "FOREIGN KEY(user_id) REFERENCES users(id)"
+        ")";
+
+    if (!query.exec(createConversationMembersTable)) {
+        qDebug() << "Failed to create conversation_members table:"
+                 << query.lastError().text();
+        return false;
+    }
+
+    QString createMessagesTable =
         "CREATE TABLE IF NOT EXISTS server_messages ("
         "id TEXT PRIMARY KEY,"
+        "conversation_id TEXT,"
         "sender_id TEXT NOT NULL,"
         "sender_name TEXT,"
         "receiver_id TEXT NOT NULL,"
         "receiver_name TEXT,"
         "content TEXT NOT NULL,"
         "timestamp TEXT NOT NULL,"
-        "delivered INTEGER NOT NULL DEFAULT 0"
+        "delivered INTEGER NOT NULL DEFAULT 0,"
+        "FOREIGN KEY(conversation_id) REFERENCES conversations(id)"
         ")";
 
-    if (!query.exec(sql)) {
+    if (!query.exec(createMessagesTable)) {
         qDebug() << "Failed to create server_messages table:"
                  << query.lastError().text();
         return false;
@@ -153,6 +226,11 @@ void ChatServer::handleJsonMessage(QTcpSocket *clientSocket,
         return;
     }
 
+    if (type == "get_contacts") {
+        handleGetContacts(clientSocket, json);
+        return;
+    }
+
     if (type == "chat_message") {
         handleChatMessage(json);
         return;
@@ -199,60 +277,7 @@ void ChatServer::handleChatMessage(const QJsonObject& json)
     }
 }
 
-bool ChatServer::saveChatMessage(QJsonObject& json)
-{
-    QString senderId = json.value("sender_id").toString();
-    QString senderName = json.value("sender_name").toString();
-    QString receiverId = json.value("receiver_id").toString();
-    QString receiverName = json.value("receiver_name").toString();
-    QString content = json.value("content").toString();
-    QString timestamp = json.value("timestamp").toString();
 
-    if (senderId.isEmpty() || receiverId.isEmpty() || content.isEmpty()) {
-        qDebug() << "Invalid chat message, cannot save:" << json;
-        return false;
-    }
-
-    if (timestamp.isEmpty()) {
-        timestamp = QDateTime::currentDateTime().toString(Qt::ISODate);
-        json["timestamp"] = timestamp;
-    }
-
-    QString messageId = json.value("message_id").toString();
-
-    if (messageId.isEmpty()) {
-        messageId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        json["message_id"] = messageId;
-    }
-
-    QSqlQuery query(m_db);
-
-    query.prepare(
-        "INSERT OR IGNORE INTO server_messages "
-        "(id, sender_id, sender_name, receiver_id, receiver_name, content, timestamp, delivered) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    );
-
-    query.addBindValue(messageId);
-    query.addBindValue(senderId);
-    query.addBindValue(senderName);
-    query.addBindValue(receiverId);
-    query.addBindValue(receiverName);
-    query.addBindValue(content);
-    query.addBindValue(timestamp);
-    query.addBindValue(0);
-
-    if (!query.exec()) {
-        qDebug() << "Failed to save server message:" << query.lastError().text();
-        return false;
-    }
-
-    qDebug() << "Server saved message:" << messageId
-             << "from" << senderId
-             << "to" << receiverId;
-
-    return true;
-}
 
 bool ChatServer::forwardChatMessage(const QJsonObject& json)
 {
@@ -281,6 +306,68 @@ bool ChatServer::forwardChatMessage(const QJsonObject& json)
     qDebug() << "Forwarded chat message to:" << receiverId;
     return true;
 }
+bool ChatServer::saveChatMessage(QJsonObject& json)
+{
+    QString conversationId = json.value("conversation_id").toString();
+    QString senderId = json.value("sender_id").toString();
+    QString senderName = json.value("sender_name").toString();
+    QString receiverId = json.value("receiver_id").toString();
+    QString receiverName = json.value("receiver_name").toString();
+    QString content = json.value("content").toString();
+    QString timestamp = json.value("timestamp").toString();
+
+    if (senderId.isEmpty() || receiverId.isEmpty() || content.isEmpty()) {
+        qDebug() << "Invalid chat message, cannot save:" << json;
+        return false;
+    }
+
+    if (conversationId.isEmpty()) {
+        conversationId = privateConversationIdForUsers(senderId, receiverId);
+        json["conversation_id"] = conversationId;
+    }
+
+    if (timestamp.isEmpty()) {
+        timestamp = QDateTime::currentDateTime().toString(Qt::ISODate);
+        json["timestamp"] = timestamp;
+    }
+
+    QString messageId = json.value("message_id").toString();
+
+    if (messageId.isEmpty()) {
+        messageId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        json["message_id"] = messageId;
+    }
+
+    QSqlQuery query(m_db);
+
+    query.prepare(
+        "INSERT OR IGNORE INTO server_messages "
+        "(id, conversation_id, sender_id, sender_name, receiver_id, receiver_name, content, timestamp, delivered) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    );
+
+    query.addBindValue(messageId);
+    query.addBindValue(conversationId);
+    query.addBindValue(senderId);
+    query.addBindValue(senderName);
+    query.addBindValue(receiverId);
+    query.addBindValue(receiverName);
+    query.addBindValue(content);
+    query.addBindValue(timestamp);
+    query.addBindValue(0);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to save server message:" << query.lastError().text();
+        return false;
+    }
+
+    qDebug() << "Server saved message:" << messageId
+             << "conversation:" << conversationId
+             << "from" << senderId
+             << "to" << receiverId;
+
+    return true;
+}
 
 void ChatServer::deliverOfflineMessages(const QString& userId)
 {
@@ -288,13 +375,15 @@ void ChatServer::deliverOfflineMessages(const QString& userId)
 
     if (!targetSocket ||
         targetSocket->state() != QAbstractSocket::ConnectedState) {
+        qDebug() << "Cannot deliver offline messages, user not connected:" << userId;
         return;
     }
 
     QSqlQuery query(m_db);
 
     query.prepare(
-        "SELECT id, sender_id, sender_name, receiver_id, receiver_name, content, timestamp "
+        "SELECT id, conversation_id, sender_id, sender_name, "
+        "receiver_id, receiver_name, content, timestamp "
         "FROM server_messages "
         "WHERE receiver_id = ? AND delivered = 0 "
         "ORDER BY timestamp ASC"
@@ -303,7 +392,8 @@ void ChatServer::deliverOfflineMessages(const QString& userId)
     query.addBindValue(userId);
 
     if (!query.exec()) {
-        qDebug() << "Failed to load offline messages:" << query.lastError().text();
+        qDebug() << "Failed to load offline messages:"
+                 << query.lastError().text();
         return;
     }
 
@@ -315,28 +405,42 @@ void ChatServer::deliverOfflineMessages(const QString& userId)
         QJsonObject json;
         json["type"] = "chat_message";
         json["message_id"] = messageId;
-        json["sender_id"] = query.value(1).toString();
-        json["sender_name"] = query.value(2).toString();
-        json["receiver_id"] = query.value(3).toString();
-        json["receiver_name"] = query.value(4).toString();
-        json["content"] = query.value(5).toString();
-        json["timestamp"] = query.value(6).toString();
+        json["conversation_id"] = query.value(1).toString();
+        json["sender_id"] = query.value(2).toString();
+        json["sender_name"] = query.value(3).toString();
+        json["receiver_id"] = query.value(4).toString();
+        json["receiver_name"] = query.value(5).toString();
+        json["content"] = query.value(6).toString();
+        json["timestamp"] = query.value(7).toString();
 
         QJsonDocument doc(json);
         QByteArray data = doc.toJson(QJsonDocument::Compact);
         data.append('\n');
 
-        targetSocket->write(data);
+        qint64 bytesWritten = targetSocket->write(data);
         targetSocket->flush();
 
-        markMessageDelivered(messageId);
-        count++;
+        qDebug() << "Sent offline message to"
+                 << userId
+                 << "messageId:" << messageId
+                 << "bytes:" << bytesWritten
+                 << "data:" << data;
+
+        if (bytesWritten > 0) {
+            markMessageDelivered(messageId);
+            count++;
+        } else {
+            qDebug() << "Failed to write offline message to socket:"
+                     << targetSocket->errorString();
+        }
     }
 
     if (count > 0) {
         qDebug() << "Delivered offline messages to"
                  << userId
                  << "count:" << count;
+    } else {
+        qDebug() << "No offline messages delivered to" << userId;
     }
 }
 
@@ -363,4 +467,220 @@ void ChatServer::markMessageDelivered(const QString& messageId)
     }
 
     qDebug() << "Marked message delivered:" << messageId;
+}
+
+QString ChatServer::privateConversationIdForUsers(const QString& userId1,
+                                                  const QString& userId2) const
+{
+    QString first = userId1;
+    QString second = userId2;
+
+    if (first > second) {
+        std::swap(first, second);
+    }
+
+    return "conv_" + first + "_" + second;
+}
+
+bool ChatServer::initDefaultData()
+{
+    QSqlQuery query(m_db);
+
+    QString now = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+    query.prepare(
+        "INSERT OR IGNORE INTO users "
+        "(id, username, password_hash, avatar_path, created_at) "
+        "VALUES (?, ?, ?, ?, ?)"
+    );
+
+    query.addBindValue("user_001");
+    query.addBindValue("张三");
+    query.addBindValue("");
+    query.addBindValue("");
+    query.addBindValue(now);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to insert default user_001:"
+                 << query.lastError().text();
+        return false;
+    }
+
+    query.prepare(
+        "INSERT OR IGNORE INTO users "
+        "(id, username, password_hash, avatar_path, created_at) "
+        "VALUES (?, ?, ?, ?, ?)"
+    );
+
+    query.addBindValue("user_002");
+    query.addBindValue("李四");
+    query.addBindValue("");
+    query.addBindValue("");
+    query.addBindValue(now);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to insert default user_002:"
+                 << query.lastError().text();
+        return false;
+    }
+
+    query.prepare(
+        "INSERT OR IGNORE INTO friendships "
+        "(id, user_id, friend_id, created_at) "
+        "VALUES (?, ?, ?, ?)"
+    );
+
+    query.addBindValue("friend_user_001_user_002");
+    query.addBindValue("user_001");
+    query.addBindValue("user_002");
+    query.addBindValue(now);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to insert friendship user_001 -> user_002:"
+                 << query.lastError().text();
+        return false;
+    }
+
+    query.prepare(
+        "INSERT OR IGNORE INTO friendships "
+        "(id, user_id, friend_id, created_at) "
+        "VALUES (?, ?, ?, ?)"
+    );
+
+    query.addBindValue("friend_user_002_user_001");
+    query.addBindValue("user_002");
+    query.addBindValue("user_001");
+    query.addBindValue(now);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to insert friendship user_002 -> user_001:"
+                 << query.lastError().text();
+        return false;
+    }
+
+    QString conversationId = privateConversationIdForUsers("user_001", "user_002");
+
+    query.prepare(
+        "INSERT OR IGNORE INTO conversations "
+        "(id, type, title, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?)"
+    );
+
+    query.addBindValue(conversationId);
+    query.addBindValue(1);          // 1 = 私聊
+    query.addBindValue("");         // 私聊标题可以为空，客户端按对方名称展示
+    query.addBindValue(now);
+    query.addBindValue(now);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to insert default conversation:"
+                 << query.lastError().text();
+        return false;
+    }
+
+    query.prepare(
+        "INSERT OR IGNORE INTO conversation_members "
+        "(id, conversation_id, user_id, joined_at, is_hidden) "
+        "VALUES (?, ?, ?, ?, ?)"
+    );
+
+    query.addBindValue("member_" + conversationId + "_user_001");
+    query.addBindValue(conversationId);
+    query.addBindValue("user_001");
+    query.addBindValue(now);
+    query.addBindValue(0);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to insert conversation member user_001:"
+                 << query.lastError().text();
+        return false;
+    }
+
+    query.prepare(
+        "INSERT OR IGNORE INTO conversation_members "
+        "(id, conversation_id, user_id, joined_at, is_hidden) "
+        "VALUES (?, ?, ?, ?, ?)"
+    );
+
+    query.addBindValue("member_" + conversationId + "_user_002");
+    query.addBindValue(conversationId);
+    query.addBindValue("user_002");
+    query.addBindValue(now);
+    query.addBindValue(0);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to insert conversation member user_002:"
+                 << query.lastError().text();
+        return false;
+    }
+
+    qDebug() << "Default users, friendships and conversations initialized";
+    return true;
+}
+
+void ChatServer::handleGetContacts(QTcpSocket *clientSocket,
+                                   const QJsonObject& json)
+{
+    QString userId = json.value("user_id").toString();
+
+    if (userId.isEmpty()) {
+        qDebug() << "Get contacts failed: empty user_id";
+        return;
+    }
+
+    sendContactsResult(clientSocket, userId);
+}
+
+void ChatServer::sendContactsResult(QTcpSocket *clientSocket,
+                                    const QString& userId)
+{
+    if (!clientSocket ||
+        clientSocket->state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+
+    QSqlQuery query(m_db);
+
+    query.prepare(
+        "SELECT users.id, users.username, users.avatar_path "
+        "FROM friendships "
+        "JOIN users ON friendships.friend_id = users.id "
+        "WHERE friendships.user_id = ? "
+        "ORDER BY users.username ASC"
+    );
+
+    query.addBindValue(userId);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to query contacts:"
+                 << query.lastError().text();
+        return;
+    }
+
+    QJsonArray contacts;
+
+    while (query.next()) {
+        QJsonObject contact;
+        contact["user_id"] = query.value(0).toString();
+        contact["user_name"] = query.value(1).toString();
+        contact["avatar_path"] = query.value(2).toString();
+
+        contacts.append(contact);
+    }
+
+    QJsonObject response;
+    response["type"] = "contacts_result";
+    response["user_id"] = userId;
+    response["contacts"] = contacts;
+
+    QJsonDocument doc(response);
+    QByteArray data = doc.toJson(QJsonDocument::Compact);
+    data.append('\n');
+
+    clientSocket->write(data);
+    clientSocket->flush();
+
+    qDebug() << "Sent contacts result to"
+             << userId
+             << "count:" << contacts.size();
 }

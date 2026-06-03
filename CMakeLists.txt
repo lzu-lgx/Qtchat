@@ -27,6 +27,8 @@ qt_add_executable(Qtchat
     network/NetworkClient.cpp
     config/AppConfig.h
     config/AppConfig.cpp
+    model/Contact.h
+    model/Contact.cpp
 )
 qt_add_executable(ChatServer
     server/main.cpp
