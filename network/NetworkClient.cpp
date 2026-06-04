@@ -36,26 +36,39 @@ NetworkClient::NetworkClient(QObject *parent)
     connect(m_socket, &QTcpSocket::readyRead,
         this, [this]()
     {
-        while (m_socket->canReadLine()) {
+        while (m_socket->canReadLine())
+        {
             QByteArray line = m_socket->readLine().trimmed();
 
             if (line.isEmpty()) {
                 continue;
             }
 
-            qDebug() << "Received raw message from server:" << line;
-
             QJsonParseError parseError;
             QJsonDocument doc = QJsonDocument::fromJson(line, &parseError);
 
-            if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+            if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+            {
                 QString text = QString::fromUtf8(line);
-                qDebug() << "Received non-json message from server:" << text;
                 emit messageReceived(text);
                 continue;
             }
 
             QJsonObject obj = doc.object();
+            QString type = obj.value("type").toString();
+
+            if (type == "login_result")
+            {
+                bool success = obj.value("success").toBool();
+                QString userId = obj.value("user_id").toString();
+                QString userName = obj.value("user_name").toString();
+                QString databaseName = obj.value("database_name").toString();
+                QString errorText = obj.value("error").toString();
+
+                emit loginResult(success, userId, userName, databaseName, errorText);
+                continue;
+            }
+
             emit jsonMessageReceived(obj);
         }
     });
@@ -109,7 +122,6 @@ void NetworkClient::sendJsonMessage(const QJsonObject& message)
     m_socket->write("\n");
     m_socket->flush();
 
-    qDebug() << "Sent JSON message to server:" << data;
 }
 
 void NetworkClient::registerClient(const QString& userId, const QString& userName)
@@ -127,6 +139,15 @@ void NetworkClient::requestContacts(const QString& userId)
     QJsonObject json;
     json["type"] = "get_contacts";
     json["user_id"] = userId;
+
+    sendJsonMessage(json);
+}
+
+void NetworkClient::login(const QString& username)
+{
+    QJsonObject json;
+    json["type"] = "login";
+    json["username"] = username;
 
     sendJsonMessage(json);
 }

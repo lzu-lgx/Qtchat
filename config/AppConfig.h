@@ -8,8 +8,9 @@ class AppConfig
 public:
     static QString configPath();
 
-    static QString value(const QString& key,
-                         const QString& defaultValue = QString());
+    static QString value(const QString& key,const QString& defaultValue = QString());
+
+    static void setRuntimeValue(const QString& key, const QString& value);
 };
 
 #endif // APPCONFIG_H

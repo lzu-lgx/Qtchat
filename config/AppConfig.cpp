@@ -4,6 +4,9 @@
 #include <QFileInfo>
 #include <QSettings>
 #include <QStringList>
+#include <QHash>
+
+static QHash<QString, QString> g_runtimeValues;
 
 QString AppConfig::configPath()
 {
@@ -28,9 +31,18 @@ QString AppConfig::configPath()
 
 QString AppConfig::value(const QString& key, const QString& defaultValue)
 {
+    if (g_runtimeValues.contains(key)) {
+        return g_runtimeValues.value(key);
+    }
+
     QSettings settings(configPath(), QSettings::IniFormat);
 
     return settings.value(key, defaultValue)
         .toString()
         .trimmed();
+}
+
+void AppConfig::setRuntimeValue(const QString& key, const QString& value)
+{
+    g_runtimeValues.insert(key, value);
 }

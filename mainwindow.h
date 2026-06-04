@@ -18,6 +18,8 @@
 #include <QJsonArray>
 #include "model/Contact.h"
 #include <QList>
+#include "dialog/LoginDialog.h"
+#include <QMessageBox>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -48,9 +50,14 @@ private:
     void loadClientConfig();
     void handleJsonNetworkMessage(const QJsonObject& json);
     void handleContactsResult(const QJsonObject& json);
+    QString conversationIdForUsers(const QString& userId1,const QString& userId2) const;
     QString conversationIdForPeer(const QString& peerId) const;
     void ensureAiConversation();
     Contact selectContact();
+    bool showLoginDialog();
+    void initializeAfterLogin(const QString& databaseName); 
+    Contact contactByConversationId(const QString& conversationId) const;
+    QString displayNameForSender(const QString& senderId) const;
 
     QString m_userId;
     QString m_userName;

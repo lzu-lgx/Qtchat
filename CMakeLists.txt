@@ -29,6 +29,8 @@ qt_add_executable(Qtchat
     config/AppConfig.cpp
     model/Contact.h
     model/Contact.cpp
+    dialog/LoginDialog.h
+    dialog/LoginDialog.cpp
 )
 qt_add_executable(ChatServer
     server/main.cpp

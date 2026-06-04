@@ -15,16 +15,19 @@
 #include <QTextCursor>
 #include <QInputDialog>
 #include <QJsonObject>
+#include <QTimer>
+#include <QMessageBox>
+#include <QEventLoop>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
     , m_conversationList(nullptr)
+    , m_newConversationButton(nullptr)
     , m_chatTitleLabel(nullptr)
     , m_messageDisplay(nullptr)
     , m_messageInput(nullptr)
     , m_sendButton(nullptr)
-    ,m_newConversationButton(nullptr)
     , m_currentConversationId()
     , m_dbManager()
     , m_aiService()
@@ -36,28 +39,12 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
 
-    loadClientConfig();
-
-    if (m_dbManager.openDatabase()) {
-        m_dbManager.initTables();
-        ensureAiConversation();
-    }
-
-    setupChatUi();
-    loadConversations();
     setupNetwork();
 
-
-    
-
-    if (!m_conversations.isEmpty())
-    {
-        m_conversationList->setCurrentRow(0);
-        showMessagesForConversation(m_conversations.first().id());
-        m_chatTitleLabel->setText(m_conversations.first().title());
+    if (!showLoginDialog()) {
+        QTimer::singleShot(0, this, &QWidget::close);
+        return;
     }
-
-    
 }
 
 MainWindow::~MainWindow()
@@ -248,20 +235,7 @@ void MainWindow::showMessagesForConversation(const QString& conversationId)
 
     for (const Message& message : m_messages) {
         
-        QString senderName;
-        if (message.senderId() == "me") 
-        {
-            senderName = "我";
-        } else if (message.senderId() == "ai")
-        {
-            senderName = "AI 助手";
-        } else if (message.senderId() == m_peerId) 
-        {
-            senderName = m_peerName;
-        } else 
-        {
-            senderName = message.senderId();
-        }
+        QString senderName = displayNameForSender(message.senderId());
         
         QString timeText = message.timestamp().toString("yyyy-MM-dd hh:mm:ss");
 
@@ -385,36 +359,30 @@ void MainWindow::setupNetwork()
             this, [this]()
     {
         qDebug() << "MainWindow received connected signal";
-        m_networkClient.registerClient(m_userId, m_userName);
-        m_networkClient.requestContacts(m_userId);
-    });
-
-    connect(&m_networkClient, &NetworkClient::messageReceived,
-            this, [this](const QString& message)
-    {
-        qDebug() << "MainWindow received network message:" << message;
     });
 
     connect(&m_networkClient, &NetworkClient::jsonMessageReceived,
-        this, [this](const QJsonObject& message)
+            this, [this](const QJsonObject& message)
     {
-        qDebug() << "MainWindow received JSON network message:" << message;
-
         QString type = message.value("type").toString();
 
-        if (type == "contacts_result") 
-        {
+        if (type == "contacts_result") {
             handleContactsResult(message);
             return;
         }
 
-        if (type == "chat_message")
-        {
+        if (type == "chat_message") {
             handleJsonNetworkMessage(message);
             return;
         }
 
         qDebug() << "Unsupported JSON message type in MainWindow:" << type;
+    });
+
+    connect(&m_networkClient, &NetworkClient::connectionError,
+            this, [this](const QString& errorText)
+    {
+        qDebug() << "Network error:" << errorText;
     });
 
     m_networkClient.connectToServer("127.0.0.1", 8888);
@@ -438,17 +406,6 @@ void MainWindow::loadClientConfig()
              << m_peerName;
 }
 
-QString MainWindow::conversationIdForPeer(const QString& peerId) const
-{
-    QString first = m_userId;
-    QString second = peerId;
-
-    if (first > second) {
-        std::swap(first, second);
-    }
-
-    return "conv_" + first + "_" + second;
-}
 
 void MainWindow::handleJsonNetworkMessage(const QJsonObject& json)
 {
@@ -466,9 +423,7 @@ void MainWindow::handleJsonNetworkMessage(const QJsonObject& json)
     QString timestampText = json.value("timestamp").toString();
 
     if (receiverId != m_userId) {
-        qDebug() << "Ignore message not for current user:"
-                 << "receiverId =" << receiverId
-                 << "currentUserId =" << m_userId;
+        qDebug() << "Ignore message not for current user:";
         return;
     }
 
@@ -535,13 +490,21 @@ void MainWindow::handleJsonNetworkMessage(const QJsonObject& json)
 
 void MainWindow::sendNetworkChatMessage(const QString& content)
 {
+    Contact contact = contactByConversationId(m_currentConversationId);
+
+    if (contact.userId().isEmpty()) {
+        qDebug() << "Cannot send network message: no contact for conversation"
+                 << m_currentConversationId;
+        return;
+    }
+
     QJsonObject json;
     json["type"] = "chat_message";
     json["conversation_id"] = m_currentConversationId;
     json["sender_id"] = m_userId;
     json["sender_name"] = m_userName;
-    json["receiver_id"] = m_peerId;
-    json["receiver_name"] = m_peerName;
+    json["receiver_id"] = contact.userId();
+    json["receiver_name"] = contact.userName();
     json["content"] = content;
     json["timestamp"] = QDateTime::currentDateTime().toString(Qt::ISODate);
 
@@ -652,4 +615,154 @@ Contact MainWindow::selectContact()
     }
 
     return m_contacts.at(index);
+}
+
+bool MainWindow::showLoginDialog()
+{
+    while (true) {
+        LoginDialog dialog(this);
+
+        if (dialog.exec() != QDialog::Accepted) {
+            return false;
+        }
+
+        QString username = dialog.username();
+
+        if (username.isEmpty()) {
+            QMessageBox::warning(this, "登录失败", "用户名不能为空");
+            continue;
+        }
+
+        if (!m_networkClient.isConnected()) {
+            QMessageBox::warning(this, "登录失败", "尚未连接到服务器");
+            continue;
+        }
+
+        QEventLoop loop;
+
+        bool finished = false;
+        bool loginSuccess = false;
+        QString loginUserId;
+        QString loginUserName;
+        QString loginDatabaseName;
+        QString loginErrorText;
+
+        QMetaObject::Connection connection =
+            connect(&m_networkClient, &NetworkClient::loginResult,
+                    &loop,
+                    [&](bool success,
+                        const QString& userId,
+                        const QString& userName,
+                        const QString& databaseName,
+                        const QString& errorText)
+        {
+            finished = true;
+            loginSuccess = success;
+            loginUserId = userId;
+            loginUserName = userName;
+            loginDatabaseName = databaseName;
+            loginErrorText = errorText;
+
+            loop.quit();
+        });
+
+        m_networkClient.login(username);
+
+        loop.exec();
+
+        disconnect(connection);
+
+        if (!finished) {
+            QMessageBox::warning(this, "登录失败", "登录请求未完成");
+            continue;
+        }
+
+        if (!loginSuccess) {
+            QMessageBox::warning(this, "登录失败", loginErrorText);
+            continue;
+        }
+
+        m_userId = loginUserId;
+        m_userName = loginUserName;
+
+        initializeAfterLogin(loginDatabaseName);
+
+        return true;
+    }
+}
+
+void MainWindow::initializeAfterLogin(const QString& databaseName)
+{
+    setWindowTitle("Qtchat - " + m_userName + " (" + m_userId + ")");
+
+    AppConfig::setRuntimeValue("Client/DatabaseName", databaseName);
+
+    if (m_dbManager.openDatabase()) {
+        m_dbManager.initTables();
+        ensureAiConversation();
+    }
+
+    setupChatUi();
+    loadConversations();
+
+    m_networkClient.registerClient(m_userId, m_userName);
+    m_networkClient.requestContacts(m_userId);
+
+    if (!m_conversations.isEmpty()) {
+        m_conversationList->setCurrentRow(0);
+        showMessagesForConversation(m_conversations.first().id());
+        m_chatTitleLabel->setText(m_conversations.first().title());
+    }
+}
+
+QString MainWindow::conversationIdForUsers(const QString& userId1,
+                                           const QString& userId2) const
+{
+    QString first = userId1;
+    QString second = userId2;
+
+    if (first > second) {
+        std::swap(first, second);
+    }
+
+    return "conv_" + first + "_" + second;
+}
+
+QString MainWindow::conversationIdForPeer(const QString& peerId) const
+{
+    return conversationIdForUsers(m_userId, peerId);
+}
+
+Contact MainWindow::contactByConversationId(const QString& conversationId) const
+{
+    for (const Contact& contact : m_contacts) {
+        if (conversationIdForPeer(contact.userId()) == conversationId) {
+            return contact;
+        }
+    }
+
+    return Contact();
+}
+
+QString MainWindow::displayNameForSender(const QString& senderId) const
+{
+    if (senderId == "me") {
+        return "我";
+    }
+
+    if (senderId == "ai") {
+        return "AI 助手";
+    }
+
+    if (senderId == m_userId) {
+        return m_userName;
+    }
+
+    for (const Contact& contact : m_contacts) {
+        if (contact.userId() == senderId) {
+            return contact.userName();
+        }
+    }
+
+    return senderId;
 }

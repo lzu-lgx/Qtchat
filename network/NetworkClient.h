@@ -19,6 +19,7 @@ public:
     void sendJsonMessage(const QJsonObject& message);
     void registerClient(const QString& userId, const QString& userName);
     void requestContacts(const QString& userId);
+    void login(const QString& username);
 
 signals:
     void connected();
@@ -26,6 +27,7 @@ signals:
     void connectionError(const QString& errorText);
     void messageReceived(const QString& message);
     void jsonMessageReceived(const QJsonObject& message);
+    void loginResult(bool success,const QString& userId,const QString& userName,const QString& databaseName,const QString& errorText);
 
 private:
     QTcpSocket *m_socket;

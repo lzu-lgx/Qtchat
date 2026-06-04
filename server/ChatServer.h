@@ -29,6 +29,10 @@ private:
     QString privateConversationIdForUsers(const QString& userId1,const QString& userId2) const;
 
     void handleJsonMessage(QTcpSocket *clientSocket, const QJsonObject& json);
+    
+    void handleLogin(QTcpSocket *clientSocket, const QJsonObject& json);
+    void sendLoginResult(QTcpSocket *clientSocket,bool success,const QString& userId,const QString& userName,const QString& errorText = QString());
+    
     void handleClientRegister(QTcpSocket *clientSocket, const QJsonObject& json);
     
     void handleGetContacts(QTcpSocket *clientSocket, const QJsonObject& json);

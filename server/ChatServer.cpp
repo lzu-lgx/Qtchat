@@ -221,6 +221,11 @@ void ChatServer::handleJsonMessage(QTcpSocket *clientSocket,
 {
     QString type = json.value("type").toString();
 
+    if (type == "login") {
+        handleLogin(clientSocket, json);
+        return;
+    }
+
     if (type == "client_register") {
         handleClientRegister(clientSocket, json);
         return;
@@ -683,4 +688,96 @@ void ChatServer::sendContactsResult(QTcpSocket *clientSocket,
     qDebug() << "Sent contacts result to"
              << userId
              << "count:" << contacts.size();
+}
+
+void ChatServer::handleLogin(QTcpSocket *clientSocket,
+                             const QJsonObject& json)
+{
+    QString username = json.value("username").toString().trimmed();
+
+    if (username.isEmpty()) {
+        sendLoginResult(clientSocket,
+                        false,
+                        "",
+                        "",
+                        "用户名不能为空");
+        return;
+    }
+
+    QSqlQuery query(m_db);
+
+    query.prepare(
+        "SELECT id, username "
+        "FROM users "
+        "WHERE username = ?"
+    );
+
+    query.addBindValue(username);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to query user for login:"
+                 << query.lastError().text();
+
+        sendLoginResult(clientSocket,
+                        false,
+                        "",
+                        "",
+                        "服务器查询用户失败");
+        return;
+    }
+
+    if (!query.next()) {
+        sendLoginResult(clientSocket,
+                        false,
+                        "",
+                        "",
+                        "用户不存在");
+        return;
+    }
+
+    QString userId = query.value(0).toString();
+    QString userName = query.value(1).toString();
+
+    qDebug() << "Login success:"
+             << userId
+             << userName;
+
+    sendLoginResult(clientSocket,
+                    true,
+                    userId,
+                    userName);
+}
+
+void ChatServer::sendLoginResult(QTcpSocket *clientSocket,
+                                 bool success,
+                                 const QString& userId,
+                                 const QString& userName,
+                                 const QString& errorText)
+{
+    if (!clientSocket ||
+        clientSocket->state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+
+    QJsonObject response;
+    response["type"] = "login_result";
+    response["success"] = success;
+
+    if (success) {
+        response["user_id"] = userId;
+        response["user_name"] = userName;
+        response["database_name"] = "chat_" + userId + ".db";
+    } else {
+        response["error"] = errorText;
+    }
+
+    QJsonDocument doc(response);
+    QByteArray data = doc.toJson(QJsonDocument::Compact);
+    data.append('\n');
+
+    clientSocket->write(data);
+    clientSocket->flush();
+
+    qDebug() << "Sent login result:"
+             << response;
 }
