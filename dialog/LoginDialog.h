@@ -18,6 +18,9 @@ public:
     QString username() const;
     QString password() const;
 
+signals:
+    void registerRequested();
+
 private:
     QLineEdit *m_usernameEdit;
     QLineEdit *m_passwordEdit;
@@ -25,6 +28,7 @@ private:
     QPushButton *m_loginButton;
     QPushButton *m_cancelButton;
     QLabel *m_titleLabel;
+    QPushButton *m_registerButton;
 };
 
 #endif // LOGINDIALOG_H

@@ -237,6 +237,11 @@ void ChatServer::handleJsonMessage(QTcpSocket *clientSocket,
         return;
     }
 
+    if (type == "register") {
+        handleRegister(clientSocket, json);
+        return;
+    }
+
     if (type == "client_register") {
         handleClientRegister(clientSocket, json);
         return;
@@ -813,4 +818,171 @@ void ChatServer::sendLoginResult(QTcpSocket *clientSocket,
 
     qDebug() << "Sent login result:"
              << response;
+}
+
+QString ChatServer::generateNextUserId()
+{
+    QSqlQuery query(m_db);
+
+    if (!query.exec("SELECT id FROM users")) {
+        qDebug() << "Failed to query users for generating user id:"
+                 << query.lastError().text();
+        return QString();
+    }
+
+    int maxNumber = 0;
+
+    while (query.next()) {
+        QString userId = query.value(0).toString();
+
+        if (!userId.startsWith("user_")) {
+            continue;
+        }
+
+        QString numberText = userId.mid(QString("user_").length());
+        bool ok = false;
+        int number = numberText.toInt(&ok);
+
+        if (ok && number > maxNumber) {
+            maxNumber = number;
+        }
+    }
+
+    int nextNumber = maxNumber + 1;
+
+    return QString("user_%1").arg(nextNumber, 3, 10, QChar('0'));
+}
+
+void ChatServer::handleRegister(QTcpSocket *clientSocket,
+                                const QJsonObject& json)
+{
+    QString username = json.value("username").toString().trimmed();
+    QString password = json.value("password").toString();
+
+    if (username.isEmpty()) {
+        sendRegisterResult(clientSocket,
+                           false,
+                           "",
+                           "",
+                           "用户名不能为空");
+        return;
+    }
+
+    if (password.isEmpty()) {
+        sendRegisterResult(clientSocket,
+                           false,
+                           "",
+                           "",
+                           "密码不能为空");
+        return;
+    }
+
+    QSqlQuery checkQuery(m_db);
+
+    checkQuery.prepare(
+        "SELECT id "
+        "FROM users "
+        "WHERE username = ?"
+    );
+
+    checkQuery.addBindValue(username);
+
+    if (!checkQuery.exec()) {
+        qDebug() << "Failed to check username:"
+                 << checkQuery.lastError().text();
+
+        sendRegisterResult(clientSocket,
+                           false,
+                           "",
+                           "",
+                           "服务器检查用户名失败");
+        return;
+    }
+
+    if (checkQuery.next()) {
+        sendRegisterResult(clientSocket,
+                           false,
+                           "",
+                           "",
+                           "用户名已存在");
+        return;
+    }
+
+    QString userId = generateNextUserId();
+
+    if (userId.isEmpty()) {
+        sendRegisterResult(clientSocket,
+                           false,
+                           "",
+                           "",
+                           "生成用户 ID 失败");
+        return;
+    }
+
+    QString now = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+    QSqlQuery insertQuery(m_db);
+
+    insertQuery.prepare(
+        "INSERT INTO users "
+        "(id, username, password_hash, avatar_path, created_at) "
+        "VALUES (?, ?, ?, ?, ?)"
+    );
+
+    insertQuery.addBindValue(userId);
+    insertQuery.addBindValue(username);
+    insertQuery.addBindValue(passwordHash(password));
+    insertQuery.addBindValue("");
+    insertQuery.addBindValue(now);
+
+    if (!insertQuery.exec()) {
+        qDebug() << "Failed to register user:"
+                 << insertQuery.lastError().text();
+
+        sendRegisterResult(clientSocket,
+                           false,
+                           "",
+                           "",
+                           "注册用户失败");
+        return;
+    }
+
+    qDebug() << "Register success:" << userId << username;
+
+    sendRegisterResult(clientSocket,
+                       true,
+                       userId,
+                       username);
+}
+
+void ChatServer::sendRegisterResult(QTcpSocket *clientSocket,
+                                    bool success,
+                                    const QString& userId,
+                                    const QString& userName,
+                                    const QString& errorText)
+{
+    if (!clientSocket ||
+        clientSocket->state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+
+    QJsonObject response;
+    response["type"] = "register_result";
+    response["success"] = success;
+
+    if (success) {
+        response["user_id"] = userId;
+        response["user_name"] = userName;
+    } else {
+        response["error"] = errorText;
+    }
+
+    QJsonDocument doc(response);
+    QByteArray data = doc.toJson(QJsonDocument::Compact);
+    data.append('\n');
+
+    clientSocket->write(data);
+    clientSocket->flush();
+
+    qDebug() << "Sent register result:" << response;
 }

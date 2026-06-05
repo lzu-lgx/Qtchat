@@ -31,6 +31,15 @@ private:
     void handleJsonMessage(QTcpSocket *clientSocket, const QJsonObject& json);
     
     void handleLogin(QTcpSocket *clientSocket, const QJsonObject& json);
+    void handleRegister(QTcpSocket *clientSocket, const QJsonObject& json);
+
+    void sendRegisterResult(QTcpSocket *clientSocket,
+                        bool success,
+                        const QString& userId,
+                        const QString& userName,
+                        const QString& errorText = QString());
+
+    QString generateNextUserId();
     void sendLoginResult(QTcpSocket *clientSocket,bool success,const QString& userId,const QString& userName,const QString& errorText = QString());
     
     void handleClientRegister(QTcpSocket *clientSocket, const QJsonObject& json);

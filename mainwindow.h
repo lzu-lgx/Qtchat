@@ -2,24 +2,26 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QList>
 #include <QListWidget>
-#include <QTextEdit>
-#include <QLineEdit>
 #include <QPushButton>
 #include <QLabel>
+#include <QTextEdit>
+#include <QLineEdit>
+#include <QString>
+#include <QJsonObject>
+#include <QJsonArray>
 
 #include "model/Conversation.h"
 #include "model/Message.h"
+#include "model/Contact.h"
+
 #include "database/DatabaseManager.h"
 #include "service/AiService.h"
 #include "network/NetworkClient.h"
-#include "config/AppConfig.h"
-#include <QJsonObject>
-#include <QJsonArray>
-#include "model/Contact.h"
-#include <QList>
+
 #include "dialog/LoginDialog.h"
-#include <QMessageBox>
+#include "dialog/RegisterDialog.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -32,56 +34,93 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    MainWindow(QWidget *parent = nullptr);
+    explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
 private:
-    void setupChatUi();
-    void loadMockData();
-    void loadConversations();
-    void showMessagesForConversation(const QString& conversationId);
-    void sendCurrentMessage();
-    void sendNetworkChatMessage(const QString& content);
-    void handleAiAssistantReply(const QString& conversationId,const QString& userMessage);
-    void showAiThinkingMessage();
-    void createNewConversation();
-    void setupNetwork();
-
-    void loadClientConfig();
-    void handleJsonNetworkMessage(const QJsonObject& json);
-    void handleContactsResult(const QJsonObject& json);
-    QString conversationIdForUsers(const QString& userId1,const QString& userId2) const;
-    QString conversationIdForPeer(const QString& peerId) const;
-    void ensureAiConversation();
-    Contact selectContact();
-    bool showLoginDialog();
-    void initializeAfterLogin(const QString& databaseName); 
-    Contact contactByConversationId(const QString& conversationId) const;
-    QString displayNameForSender(const QString& senderId) const;
-
-    QString m_userId;
-    QString m_userName;
-    QString m_peerId;
-    QString m_peerName;
+    enum class LeftListMode
+    {
+        Conversations,
+        Contacts
+    };
 
 private:
+    // UI
     Ui::MainWindow *ui;
 
     QListWidget *m_conversationList;
+    QPushButton *m_conversationModeButton;
+    QPushButton *m_contactsModeButton;
+
     QLabel *m_chatTitleLabel;
     QTextEdit *m_messageDisplay;
     QLineEdit *m_messageInput;
     QPushButton *m_sendButton;
-    QPushButton *m_newConversationButton;
-    DatabaseManager m_dbManager;
+
+    // 状态
     QString m_currentConversationId;
+
+    QString m_userId;
+    QString m_userName;
+
+    // 旧配置字段，可以暂时保留，避免 cpp 里还有残留引用时报错
+    QString m_peerId;
+    QString m_peerName;
+
+    LeftListMode m_leftListMode;
+
+    // 数据
+    QList<Conversation> m_conversations;
+    QList<Contact> m_contacts;
+
+    // 模块
+    DatabaseManager m_dbManager;
     AiService m_aiService;
     NetworkClient m_networkClient;
 
-    QList<Conversation> m_conversations;
-    QList<Message> m_messages;
-    QList<Contact> m_contacts;
-    
+private:
+    // 初始化
+    void setupChatUi();
+    void setupNetwork();
+    void loadClientConfig();
+    void initializeAfterLogin(const QString& databaseName);
+
+    // 登录 / 注册
+    bool showLoginDialog();
+    bool handleRegister();
+
+    // 会话
+    void loadConversations();
+    void showMessagesForConversation(const QString& conversationId);
+
+    QString conversationIdForUsers(const QString& userId1,
+                                   const QString& userId2) const;
+
+    QString conversationIdForPeer(const QString& peerId) const;
+
+    // 联系人
+    void handleContactsResult(const QJsonObject& json);
+    Contact contactByUserId(const QString& userId) const;
+    Contact contactByConversationId(const QString& conversationId) const;
+    void openConversationWithContact(const Contact& contact);
+
+    // 左侧列表模式
+    void showConversationListMode();
+    void showContactListMode();
+
+    // 消息发送 / 接收
+    void sendCurrentMessage();
+    void sendNetworkChatMessage(const QString& content);
+    void handleJsonNetworkMessage(const QJsonObject& json);
+
+    // AI 助手
+    void ensureAiConversation();
+    void showAiThinkingMessage();
+    void handleAiAssistantReply(const QString& conversationId,
+                                const QString& userMessage);
+
+    // 显示辅助
+    QString displayNameForSender(const QString& senderId) const;
 };
 
 #endif // MAINWINDOW_H

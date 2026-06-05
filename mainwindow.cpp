@@ -1,8 +1,5 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
-
-#include "data/MockData.h"
-
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -18,12 +15,12 @@
 #include <QTimer>
 #include <QMessageBox>
 #include <QEventLoop>
+#include "config/AppConfig.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
     , m_conversationList(nullptr)
-    , m_newConversationButton(nullptr)
     , m_chatTitleLabel(nullptr)
     , m_messageDisplay(nullptr)
     , m_messageInput(nullptr)
@@ -36,6 +33,9 @@ MainWindow::MainWindow(QWidget *parent)
     , m_userName()
     , m_peerId()
     , m_peerName()
+    , m_conversationModeButton(nullptr)
+    , m_contactsModeButton(nullptr)
+    , m_leftListMode(LeftListMode::Conversations)
 {
     ui->setupUi(this);
 
@@ -63,7 +63,8 @@ void MainWindow::setupChatUi()
     leftPanel->setFixedWidth(220);
     QVBoxLayout *leftLayout = new QVBoxLayout(leftPanel);
 
-    m_newConversationButton = new QPushButton("新建会话", leftPanel);
+    m_conversationModeButton = new QPushButton("会话列表", leftPanel);
+    m_contactsModeButton = new QPushButton("通讯录", leftPanel);
     m_conversationList = new QListWidget(leftPanel);
     
 
@@ -90,7 +91,12 @@ void MainWindow::setupChatUi()
     chatLayout->addWidget(m_chatTitleLabel);
     chatLayout->addWidget(m_messageDisplay);
     chatLayout->addWidget(inputWidget);
-    leftLayout->addWidget(m_newConversationButton);
+    
+    QHBoxLayout *modeButtonLayout = new QHBoxLayout;
+    modeButtonLayout->addWidget(m_conversationModeButton);
+    modeButtonLayout->addWidget(m_contactsModeButton);
+
+    leftLayout->addLayout(modeButtonLayout);
     leftLayout->addWidget(m_conversationList);
 
     mainLayout->addWidget(leftPanel);
@@ -99,12 +105,36 @@ void MainWindow::setupChatUi()
     connect(m_conversationList, &QListWidget::itemClicked,
         this, [this](QListWidgetItem *item)
     {
-        m_currentConversationId = item->data(Qt::UserRole).toString();
+        if (!item)
+        {
+            return;
+        }
 
-        QString title = item->text().split('\n').first();
-        m_chatTitleLabel->setText(title);
+        QString id = item->data(Qt::UserRole).toString();
 
-        showMessagesForConversation(m_currentConversationId);
+        if (m_leftListMode == LeftListMode::Conversations)
+        {
+            QString conversationId = id;
+
+            m_currentConversationId = conversationId;
+            m_chatTitleLabel->setText(item->text());
+            showMessagesForConversation(conversationId);
+            return;
+        }
+
+        if (m_leftListMode == LeftListMode::Contacts)
+        {
+            QString contactId = id;
+            Contact contact = contactByUserId(contactId);
+
+            if (contact.userId().isEmpty())
+            {
+                return;
+            }
+
+            openConversationWithContact(contact);
+            return;
+        }
     });
     connect(m_sendButton, &QPushButton::clicked,
             this, [this]()
@@ -117,11 +147,17 @@ void MainWindow::setupChatUi()
             {
                  sendCurrentMessage();
             });
-    connect(m_newConversationButton, &QPushButton::clicked,
+    connect(m_conversationModeButton, &QPushButton::clicked,
         this, [this]()
-            {
-                createNewConversation();
-            });
+    {
+        showConversationListMode();
+    });
+
+    connect(m_contactsModeButton, &QPushButton::clicked,
+        this, [this]()
+    {
+        showContactListMode();
+    });
 
     connect(&m_aiService, &AiService::replyReady,
         this, [this](const QString& conversationId,
@@ -180,11 +216,7 @@ void MainWindow::setupChatUi()
 
 }
 
-void MainWindow::loadMockData()
-{
-    m_conversations = MockData::createConversations();
-    m_messages = MockData::createMessages();
-}
+
 
 void MainWindow::loadConversations()
 {
@@ -227,17 +259,18 @@ void MainWindow::loadConversations()
 
 void MainWindow::showMessagesForConversation(const QString& conversationId)
 {
-    m_messages = m_dbManager.loadMessages(conversationId);
-
     m_messageDisplay->clear();
+
+    QList<Message> messages =
+        m_dbManager.loadMessages(conversationId);
 
     QString text;
 
-    for (const Message& message : m_messages) {
-        
+    for (const Message& message : messages) {
         QString senderName = displayNameForSender(message.senderId());
-        
-        QString timeText = message.timestamp().toString("yyyy-MM-dd hh:mm:ss");
+
+        QString timeText =
+            message.timestamp().toString("yyyy-MM-dd hh:mm:ss");
 
         text += senderName + "  " + timeText + "\n";
         text += message.content() + "\n\n";
@@ -319,38 +352,6 @@ void MainWindow::showAiThinkingMessage()
 
     m_messageDisplay->setText(currentText);
     m_messageDisplay->moveCursor(QTextCursor::End);
-}
-void MainWindow::createNewConversation()
-{
-    Contact contact = selectContact();
-
-    if (contact.userId().isEmpty()) {
-        qDebug() << "Create conversation canceled or no contact selected";
-        return;
-    }
-
-    QString conversationId = conversationIdForPeer(contact.userId());
-    QString title = contact.userName();
-
-    Conversation conversation(
-        conversationId,
-        title,
-        contact.avatarPath(),
-        Conversation::Type::PrivateChat,
-        "",
-        QDateTime::currentDateTime()
-    );
-
-    if (!m_dbManager.saveConversation(conversation)) {
-        return;
-    }
-
-    m_currentConversationId = conversationId;
-
-    loadConversations();
-
-    m_chatTitleLabel->setText(title);
-    showMessagesForConversation(conversationId);
 }
 
 void MainWindow::setupNetwork()
@@ -577,44 +578,11 @@ void MainWindow::handleContactsResult(const QJsonObject& json)
                  << contact.userId()
                  << contact.userName();
     }
-}
 
-Contact MainWindow::selectContact()
-{
-    if (m_contacts.isEmpty()) {
-        qDebug() << "No contacts available";
-        return Contact();
+    if (m_leftListMode == LeftListMode::Contacts)
+    {
+        showContactListMode();
     }
-
-    QStringList contactNames;
-
-    for (const Contact& contact : m_contacts) {
-        contactNames.append(contact.userName() + " (" + contact.userId() + ")");
-    }
-
-    bool ok = false;
-
-    QString selected = QInputDialog::getItem(
-        this,
-        "选择联系人",
-        "请选择要聊天的联系人：",
-        contactNames,
-        0,
-        false,
-        &ok
-    );
-
-    if (!ok || selected.isEmpty()) {
-        return Contact();
-    }
-
-    int index = contactNames.indexOf(selected);
-
-    if (index < 0 || index >= m_contacts.size()) {
-        return Contact();
-    }
-
-    return m_contacts.at(index);
 }
 
 bool MainWindow::showLoginDialog()
@@ -622,21 +590,25 @@ bool MainWindow::showLoginDialog()
     while (true) {
         LoginDialog dialog(this);
 
+        connect(&dialog, &LoginDialog::registerRequested,
+                this, [this]()
+        {
+            handleRegister();
+        });
+
         if (dialog.exec() != QDialog::Accepted) {
             return false;
         }
 
-        QString username = dialog.username();
+        QString username = dialog.username().trimmed();
         QString password = dialog.password();
 
-        if (username.isEmpty())
-        {
+        if (username.isEmpty()) {
             QMessageBox::warning(this, "登录失败", "用户名不能为空");
             continue;
         }
 
-        if (password.isEmpty()) 
-        {
+        if (password.isEmpty()) {
             QMessageBox::warning(this, "登录失败", "密码不能为空");
             continue;
         }
@@ -773,4 +745,172 @@ QString MainWindow::displayNameForSender(const QString& senderId) const
     }
 
     return senderId;
+}
+
+bool MainWindow::handleRegister()
+{
+    RegisterDialog dialog(this);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return false;
+    }
+
+    QString username = dialog.username();
+    QString password = dialog.password();
+    QString confirmPassword = dialog.confirmPassword();
+    QString captcha = dialog.captcha();
+
+    if (username.isEmpty()) {
+        QMessageBox::warning(this, "注册失败", "用户名不能为空");
+        return false;
+    }
+
+    if (password.isEmpty()) {
+        QMessageBox::warning(this, "注册失败", "密码不能为空");
+        return false;
+    }
+
+    if (password.length() < 6) {
+        QMessageBox::warning(this, "注册失败", "密码长度不能少于 6 位");
+        return false;
+    }
+
+    if (password != confirmPassword) {
+        QMessageBox::warning(this, "注册失败", "两次输入的密码不一致");
+        return false;
+    }
+
+    if (captcha != "1234") {
+        QMessageBox::warning(this, "注册失败", "验证码错误");
+        return false;
+    }
+
+    if (!m_networkClient.isConnected()) {
+        QMessageBox::warning(this, "注册失败", "尚未连接到服务器");
+        return false;
+    }
+
+    QEventLoop loop;
+
+    bool finished = false;
+    bool registerSuccess = false;
+    QString registerUserId;
+    QString registerUserName;
+    QString registerErrorText;
+
+    QMetaObject::Connection connection =
+        connect(&m_networkClient, &NetworkClient::registerResult,
+                &loop,
+                [&](bool success,
+                    const QString& userId,
+                    const QString& userName,
+                    const QString& errorText)
+    {
+        finished = true;
+        registerSuccess = success;
+        registerUserId = userId;
+        registerUserName = userName;
+        registerErrorText = errorText;
+
+        loop.quit();
+    });
+
+    m_networkClient.registerUser(username, password);
+
+    loop.exec();
+
+    disconnect(connection);
+
+    if (!finished) {
+        QMessageBox::warning(this, "注册失败", "注册请求未完成");
+        return false;
+    }
+
+    if (!registerSuccess) {
+        QMessageBox::warning(this, "注册失败", registerErrorText);
+        return false;
+    }
+
+    QMessageBox::information(
+        this,
+        "注册成功",
+        "注册成功！\n"
+        "用户ID：" + registerUserId + "\n"
+        "用户名：" + registerUserName + "\n\n"
+        "请返回登录窗口进行登录。"
+    );
+
+    return true;
+}
+
+void MainWindow::showConversationListMode()
+{
+    m_leftListMode = LeftListMode::Conversations;
+
+    
+
+    loadConversations();
+}
+
+void MainWindow::showContactListMode()
+{
+    m_leftListMode = LeftListMode::Contacts;
+
+    
+
+    m_conversationList->clear();
+
+    for (const Contact& contact : m_contacts) {
+        QListWidgetItem *item = new QListWidgetItem(contact.userName());
+        item->setData(Qt::UserRole, contact.userId());
+
+        m_conversationList->addItem(item);
+    }
+
+    if (m_contacts.isEmpty()) {
+        QListWidgetItem *item = new QListWidgetItem("暂无联系人");
+        item->setFlags(item->flags() & ~Qt::ItemIsSelectable);
+        m_conversationList->addItem(item);
+    }
+}
+
+Contact MainWindow::contactByUserId(const QString& userId) const
+{
+    for (const Contact& contact : m_contacts) {
+        if (contact.userId() == userId) {
+            return contact;
+        }
+    }
+
+    return Contact();
+}
+
+void MainWindow::openConversationWithContact(const Contact& contact)
+{
+    if (contact.userId().isEmpty()) {
+        return;
+    }
+
+    QString conversationId = conversationIdForPeer(contact.userId());
+
+    Conversation conversation(
+        conversationId,
+        contact.userName(),
+        contact.avatarPath(),
+        Conversation::Type::PrivateChat,
+        "",
+        QDateTime::currentDateTime()
+    );
+
+    m_dbManager.saveConversation(conversation);
+
+    m_currentConversationId = conversationId;
+
+    m_leftListMode = LeftListMode::Conversations;
+    
+
+    loadConversations();
+
+    m_chatTitleLabel->setText(contact.userName());
+    showMessagesForConversation(conversationId);
 }

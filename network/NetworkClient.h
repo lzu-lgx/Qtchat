@@ -20,6 +20,7 @@ public:
     void registerClient(const QString& userId, const QString& userName);
     void requestContacts(const QString& userId);
     void login(const QString& username, const QString& password);
+    void registerUser(const QString& username, const QString& password);
 
 signals:
     void connected();
@@ -28,6 +29,7 @@ signals:
     void messageReceived(const QString& message);
     void jsonMessageReceived(const QJsonObject& message);
     void loginResult(bool success,const QString& userId,const QString& userName,const QString& databaseName,const QString& errorText);
+    void registerResult(bool success,const QString& userId,const QString& userName,const QString& errorText);
 
 private:
     QTcpSocket *m_socket;

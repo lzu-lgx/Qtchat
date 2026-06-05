@@ -11,6 +11,7 @@ LoginDialog::LoginDialog(QWidget *parent)
       m_usernameEdit(new QLineEdit(this)),
       m_passwordEdit(new QLineEdit(this)),
       m_loginButton(new QPushButton("登录", this)),
+      m_registerButton(new QPushButton("注册", this)),
       m_cancelButton(new QPushButton("取消", this)),
       m_titleLabel(new QLabel("请输入用户名和密码", this))
 {
@@ -32,12 +33,19 @@ LoginDialog::LoginDialog(QWidget *parent)
     QHBoxLayout *buttonLayout = new QHBoxLayout;
     buttonLayout->addStretch();
     buttonLayout->addWidget(m_loginButton);
+    buttonLayout->addWidget(m_registerButton);
     buttonLayout->addWidget(m_cancelButton);
 
     mainLayout->addLayout(buttonLayout);
 
     connect(m_loginButton, &QPushButton::clicked,
             this, &LoginDialog::accept);
+    
+    connect(m_registerButton, &QPushButton::clicked,
+        this, [this]()
+    {
+        emit registerRequested();
+    });
 
     connect(m_cancelButton, &QPushButton::clicked,
             this, &LoginDialog::reject);

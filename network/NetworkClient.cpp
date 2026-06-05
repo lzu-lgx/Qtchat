@@ -69,6 +69,17 @@ NetworkClient::NetworkClient(QObject *parent)
                 continue;
             }
 
+            if (type == "register_result") 
+            {
+                bool success = obj.value("success").toBool();
+                QString userId = obj.value("user_id").toString();
+                QString userName = obj.value("user_name").toString();
+                QString errorText = obj.value("error").toString();
+
+                emit registerResult(success, userId, userName, errorText);
+                continue;
+            }
+
             emit jsonMessageReceived(obj);
         }
     });
@@ -147,6 +158,17 @@ void NetworkClient::login(const QString& username, const QString& password)
 {
     QJsonObject json;
     json["type"] = "login";
+    json["username"] = username;
+    json["password"] = password;
+
+    sendJsonMessage(json);
+}
+
+void NetworkClient::registerUser(const QString& username,
+                                 const QString& password)
+{
+    QJsonObject json;
+    json["type"] = "register";
     json["username"] = username;
     json["password"] = password;
 
