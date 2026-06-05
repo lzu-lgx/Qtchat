@@ -19,7 +19,7 @@ public:
     void sendJsonMessage(const QJsonObject& message);
     void registerClient(const QString& userId, const QString& userName);
     void requestContacts(const QString& userId);
-    void login(const QString& username);
+    void login(const QString& username, const QString& password);
 
 signals:
     void connected();

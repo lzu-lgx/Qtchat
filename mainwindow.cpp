@@ -627,9 +627,17 @@ bool MainWindow::showLoginDialog()
         }
 
         QString username = dialog.username();
+        QString password = dialog.password();
 
-        if (username.isEmpty()) {
+        if (username.isEmpty())
+        {
             QMessageBox::warning(this, "登录失败", "用户名不能为空");
+            continue;
+        }
+
+        if (password.isEmpty()) 
+        {
+            QMessageBox::warning(this, "登录失败", "密码不能为空");
             continue;
         }
 
@@ -666,7 +674,7 @@ bool MainWindow::showLoginDialog()
             loop.quit();
         });
 
-        m_networkClient.login(username);
+        m_networkClient.login(username, password);
 
         loop.exec();
 

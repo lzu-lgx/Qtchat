@@ -16,9 +16,12 @@ public:
     explicit LoginDialog(QWidget *parent = nullptr);
 
     QString username() const;
+    QString password() const;
 
 private:
     QLineEdit *m_usernameEdit;
+    QLineEdit *m_passwordEdit;
+
     QPushButton *m_loginButton;
     QPushButton *m_cancelButton;
     QLabel *m_titleLabel;

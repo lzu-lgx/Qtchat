@@ -143,11 +143,12 @@ void NetworkClient::requestContacts(const QString& userId)
     sendJsonMessage(json);
 }
 
-void NetworkClient::login(const QString& username)
+void NetworkClient::login(const QString& username, const QString& password)
 {
     QJsonObject json;
     json["type"] = "login";
     json["username"] = username;
+    json["password"] = password;
 
     sendJsonMessage(json);
 }

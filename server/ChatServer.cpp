@@ -11,6 +11,17 @@
 #include <QAbstractSocket>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QCryptographicHash>
+
+static QString passwordHash(const QString& password)
+{
+    QByteArray hash = QCryptographicHash::hash(
+        password.toUtf8(),
+        QCryptographicHash::Sha256
+    );
+
+    return QString(hash.toHex());
+}
 
 ChatServer::ChatServer(QObject *parent)
     : QObject(parent),
@@ -501,7 +512,7 @@ bool ChatServer::initDefaultData()
 
     query.addBindValue("user_001");
     query.addBindValue("张三");
-    query.addBindValue("");
+    query.addBindValue(passwordHash("123456"));
     query.addBindValue("");
     query.addBindValue(now);
 
@@ -519,7 +530,7 @@ bool ChatServer::initDefaultData()
 
     query.addBindValue("user_002");
     query.addBindValue("李四");
-    query.addBindValue("");
+    query.addBindValue(passwordHash("123456"));
     query.addBindValue("");
     query.addBindValue(now);
 
@@ -694,6 +705,7 @@ void ChatServer::handleLogin(QTcpSocket *clientSocket,
                              const QJsonObject& json)
 {
     QString username = json.value("username").toString().trimmed();
+    QString password = json.value("password").toString();
 
     if (username.isEmpty()) {
         sendLoginResult(clientSocket,
@@ -704,10 +716,19 @@ void ChatServer::handleLogin(QTcpSocket *clientSocket,
         return;
     }
 
+    if (password.isEmpty()) {
+        sendLoginResult(clientSocket,
+                        false,
+                        "",
+                        "",
+                        "密码不能为空");
+        return;
+    }
+
     QSqlQuery query(m_db);
 
     query.prepare(
-        "SELECT id, username "
+        "SELECT id, username, password_hash "
         "FROM users "
         "WHERE username = ?"
     );
@@ -737,6 +758,18 @@ void ChatServer::handleLogin(QTcpSocket *clientSocket,
 
     QString userId = query.value(0).toString();
     QString userName = query.value(1).toString();
+    QString savedPasswordHash = query.value(2).toString();
+
+    QString inputPasswordHash = passwordHash(password);
+
+    if (savedPasswordHash != inputPasswordHash) {
+        sendLoginResult(clientSocket,
+                        false,
+                        "",
+                        "",
+                        "密码错误");
+        return;
+    }
 
     qDebug() << "Login success:"
              << userId
