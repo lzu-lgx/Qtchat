@@ -6,7 +6,9 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QLabel>
-#include <QTextEdit>
+#include <QTextBrowser>
+#include<QTextEdit>
+#include<QUrl>
 #include <QLineEdit>
 #include <QString>
 #include <QJsonObject>
@@ -23,6 +25,7 @@
 #include "dialog/LoginDialog.h"
 #include "dialog/RegisterDialog.h"
 #include "dialog/AddFriendDialog.h"
+#include "model/FriendRequest.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -54,7 +57,7 @@ private:
     QPushButton *m_contactsModeButton;
 
     QLabel *m_chatTitleLabel;
-    QTextEdit *m_messageDisplay;
+    QTextBrowser *m_messageDisplay;
     QLineEdit *m_messageInput;
     QPushButton *m_sendButton;
 
@@ -73,6 +76,7 @@ private:
     // 数据
     QList<Conversation> m_conversations;
     QList<Contact> m_contacts;
+    QList<FriendRequest> m_friendRequests;
 
     // 模块
     DatabaseManager m_dbManager;
@@ -129,6 +133,12 @@ private:
     void handleAddFriend();
 
     void addOrUpdateContact(const Contact& contact);
+    void ensureFriendRequestsConversation();
+    bool isFriendRequestsConversation(const QString& conversationId) const;
+    void showFriendRequestMessages();
+    void handleFriendRequestLinkClicked(const QUrl& url);
+    void addOrUpdateFriendRequest(const FriendRequest& request);
+
 };
 
 #endif // MAINWINDOW_H

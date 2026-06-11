@@ -35,6 +35,7 @@ qt_add_executable(Qtchat
     dialog/RegisterDialog.cpp
     dialog/AddFriendDialog.h
     dialog/AddFriendDialog.cpp
+    model/FriendRequest.h
 )
 qt_add_executable(ChatServer
     server/main.cpp

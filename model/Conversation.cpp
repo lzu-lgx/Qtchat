@@ -60,3 +60,4 @@ void Conversation::setUpdatedAt(const QDateTime& time)
 {
     m_updatedAt = time;
 }
+

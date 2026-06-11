@@ -59,15 +59,23 @@ private:
     void notifyContactsUpdated(const QString& userId);
     void handleSendFriendRequest(QTcpSocket *clientSocket,const QJsonObject& json);
 
-    void sendFriendRequestResult(QTcpSocket *clientSocket,bool success,const QString& message,const QString& errorText = QString());
-
+    void sendFriendRequestResult(QTcpSocket *clientSocket,bool success,const QString& message,const QString& errorText = QString(),
+            const QString& requestId = QString(),const QString& toUserId = QString(),
+            const QString& toUserName = QString());
+        
     void notifyFriendRequestReceived(const QString& toUserId,const QString& requestId,const QString& fromUserId,const QString& fromUserName,const QString& message);
 
     void handleRespondFriendRequest(QTcpSocket *clientSocket,const QJsonObject& json);
 
     void sendRespondFriendRequestResult(QTcpSocket *clientSocket,bool success,const QString& action,const QString& friendId = QString(),const QString& friendName = QString(),
         const QString& avatarPath = QString(),const QString& conversationId = QString(),const QString& errorText = QString());
+    
+    void handleGetFriendRequests(QTcpSocket *clientSocket,const QJsonObject& json);
 
+    void sendFriendRequestsResult(QTcpSocket *clientSocket,const QString& userId);
+
+    void notifyFriendRequestStatusUpdated(const QString& userId,const QString& requestId,int status,
+            const QString& action,const QString& friendId,const QString& friendName,const QString& conversationId);
     QTcpServer *m_server;
     QList<QTcpSocket*> m_clients;
     QHash<QString, QTcpSocket*> m_userSockets;

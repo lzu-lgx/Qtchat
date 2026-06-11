@@ -280,6 +280,12 @@ void ChatServer::handleJsonMessage(QTcpSocket *clientSocket,
         return;
     }
 
+    if (type == "get_friend_requests")
+    {
+        handleGetFriendRequests(clientSocket, json);
+        return;
+    }
+
     if (type == "respond_friend_request") {
         handleRespondFriendRequest(clientSocket, json);
         return;
@@ -1486,10 +1492,15 @@ void ChatServer::handleSendFriendRequest(QTcpSocket *clientSocket,
         int status = requestQuery.value(1).toInt();
 
         if (status == 0) {
+            QString requestId = requestQuery.value(0).toString();
+
             sendFriendRequestResult(clientSocket,
-                                    false,
-                                    "",
-                                    "好友申请已发送，等待对方处理");
+                            true,
+                            "好友申请已发送，等待对方处理",
+                            QString(),
+                            requestId,
+                            toUserId,
+                            toUserName);
             return;
         }
 
@@ -1519,8 +1530,12 @@ void ChatServer::handleSendFriendRequest(QTcpSocket *clientSocket,
         }
 
         sendFriendRequestResult(clientSocket,
-                                true,
-                                "好友申请已发送");
+                        true,
+                        "好友申请已发送",
+                        QString(),
+                        requestId,
+                        toUserId,
+                        toUserName);
 
         notifyFriendRequestReceived(toUserId,
                                     requestId,
@@ -1568,8 +1583,12 @@ void ChatServer::handleSendFriendRequest(QTcpSocket *clientSocket,
              << toUserId;
 
     sendFriendRequestResult(clientSocket,
-                            true,
-                            "好友申请已发送");
+                        true,
+                        "好友申请已发送",
+                        QString(),
+                        requestId,
+                        toUserId,
+                        toUserName);
 
     notifyFriendRequestReceived(toUserId,
                                 requestId,
@@ -1581,7 +1600,10 @@ void ChatServer::handleSendFriendRequest(QTcpSocket *clientSocket,
 void ChatServer::sendFriendRequestResult(QTcpSocket *clientSocket,
                                          bool success,
                                          const QString& message,
-                                         const QString& errorText)
+                                         const QString& errorText,
+                                         const QString& requestId,
+                                         const QString& toUserId,
+                                         const QString& toUserName)
 {
     if (!clientSocket ||
         clientSocket->state() != QAbstractSocket::ConnectedState) {
@@ -1594,6 +1616,9 @@ void ChatServer::sendFriendRequestResult(QTcpSocket *clientSocket,
 
     if (success) {
         response["message"] = message;
+        response["request_id"] = requestId;
+        response["to_user_id"] = toUserId;
+        response["to_user_name"] = toUserName;
     } else {
         response["error"] = errorText;
     }
@@ -1817,28 +1842,46 @@ void ChatServer::handleRespondFriendRequest(QTcpSocket *clientSocket,
              << action;
 
     if (action == "accept") {
-        // 当前处理申请的人是 toUserId，所以它的新好友是 fromUserId
-        sendRespondFriendRequestResult(clientSocket,
-                                       true,
-                                       action,
-                                       fromUserId,
-                                       fromUserName,
-                                       "",
-                                       conversationId,
-                                       "");
+    sendRespondFriendRequestResult(clientSocket,
+                                   true,
+                                   action,
+                                   fromUserId,
+                                   fromUserName,
+                                   "",
+                                   conversationId,
+                                   "");
 
-        notifyContactsUpdated(fromUserId);
-        notifyContactsUpdated(toUserId);
-    } else {
-        sendRespondFriendRequestResult(clientSocket,
-                                       true,
-                                       action,
-                                       "",
-                                       "",
-                                       "",
-                                       "",
-                                       "");
-    }
+    // 通知双方刷新通讯录
+    notifyContactsUpdated(fromUserId);
+    notifyContactsUpdated(toUserId);
+
+    // 关键新增：通知申请发起者，这条“已发送申请”状态变成“对方已同意”
+    notifyFriendRequestStatusUpdated(fromUserId,
+                                     requestId,
+                                     1,
+                                     action,
+                                     toUserId,
+                                     toUserName,
+                                     conversationId);
+} else {
+    sendRespondFriendRequestResult(clientSocket,
+                                   true,
+                                   action,
+                                   "",
+                                   "",
+                                   "",
+                                   "",
+                                   "");
+
+    // 关键新增：通知申请发起者，这条“已发送申请”状态变成“对方已拒绝”
+    notifyFriendRequestStatusUpdated(fromUserId,
+                                     requestId,
+                                     2,
+                                     action,
+                                     toUserId,
+                                     toUserName,
+                                     "");
+}
 }
 
 void ChatServer::sendRespondFriendRequestResult(QTcpSocket *clientSocket,
@@ -1877,4 +1920,109 @@ void ChatServer::sendRespondFriendRequestResult(QTcpSocket *clientSocket,
     clientSocket->flush();
 
     qDebug() << "Sent respond friend request result:" << response;
+}
+
+void ChatServer::handleGetFriendRequests(QTcpSocket *clientSocket,
+                                         const QJsonObject& json)
+{
+    QString userId = json.value("user_id").toString().trimmed();
+
+    if (userId.isEmpty()) {
+        qDebug() << "get_friend_requests failed: empty user_id";
+        return;
+    }
+
+    sendFriendRequestsResult(clientSocket, userId);
+}
+
+void ChatServer::sendFriendRequestsResult(QTcpSocket *clientSocket,
+                                          const QString& userId)
+{
+    if (!clientSocket ||
+        clientSocket->state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+
+    QJsonArray requestsArray;
+
+    QSqlQuery query(m_db);
+    query.prepare(
+        "SELECT id, from_user_id, from_user_name, message, status, created_at "
+        "FROM friend_requests "
+        "WHERE to_user_id = ? AND status = 0 "
+        "ORDER BY created_at ASC"
+    );
+    query.addBindValue(userId);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to query friend requests:"
+                 << query.lastError().text();
+        return;
+    }
+
+    while (query.next()) {
+        QJsonObject requestObj;
+        requestObj["request_id"] = query.value(0).toString();
+        requestObj["from_user_id"] = query.value(1).toString();
+        requestObj["from_user_name"] = query.value(2).toString();
+        requestObj["message"] = query.value(3).toString();
+        requestObj["status"] = query.value(4).toInt();
+        requestObj["created_at"] = query.value(5).toString();
+
+        requestsArray.append(requestObj);
+    }
+
+    QJsonObject response;
+    response["type"] = "friend_requests_result";
+    response["user_id"] = userId;
+    response["requests"] = requestsArray;
+
+    QJsonDocument doc(response);
+    QByteArray data = doc.toJson(QJsonDocument::Compact);
+    data.append('\n');
+
+    clientSocket->write(data);
+    clientSocket->flush();
+
+    qDebug() << "Sent friend requests result to"
+             << userId
+             << "count:"
+             << requestsArray.size();
+}
+
+void ChatServer::notifyFriendRequestStatusUpdated(const QString& userId,
+                                                  const QString& requestId,
+                                                  int status,
+                                                  const QString& action,
+                                                  const QString& friendId,
+                                                  const QString& friendName,
+                                                  const QString& conversationId)
+{
+    QTcpSocket *targetSocket = m_userSockets.value(userId, nullptr);
+
+    if (!targetSocket ||
+        targetSocket->state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+
+    QJsonObject json;
+    json["type"] = "friend_request_status_updated";
+    json["request_id"] = requestId;
+    json["status"] = status;
+    json["action"] = action;
+    json["friend_id"] = friendId;
+    json["friend_name"] = friendName;
+    json["conversation_id"] = conversationId;
+
+    QJsonDocument doc(json);
+    QByteArray data = doc.toJson(QJsonDocument::Compact);
+    data.append('\n');
+
+    targetSocket->write(data);
+    targetSocket->flush();
+
+    qDebug() << "Notified friend request status updated:"
+             << userId
+             << requestId
+             << action;
 }

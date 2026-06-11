@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QJsonObject>
+#include <QJsonArray>
 
 NetworkClient::NetworkClient(QObject *parent)
     : QObject(parent),
@@ -80,13 +81,15 @@ NetworkClient::NetworkClient(QObject *parent)
                 continue;
             }
 
-            if (type == "send_friend_request_result")
-            {
+            if (type == "send_friend_request_result") {
                 bool success = obj.value("success").toBool();
+                QString requestId = obj.value("request_id").toString();
+                QString toUserId = obj.value("to_user_id").toString();
+                QString toUserName = obj.value("to_user_name").toString();
                 QString message = obj.value("message").toString();
                 QString errorText = obj.value("error").toString();
 
-                emit addFriendResult(success,"","","","",success ? message : errorText);
+                emit sendFriendRequestResult(success,requestId,toUserId,toUserName,message,errorText);
                 continue;
             }
 
@@ -100,6 +103,13 @@ NetworkClient::NetworkClient(QObject *parent)
                 QString errorText = obj.value("error").toString();
 
                 emit respondFriendRequestResult(success,action,friendId,friendName,avatarPath,conversationId,errorText);
+                continue;
+            }
+
+            if (type == "friend_requests_result") {
+                QJsonArray requests = obj.value("requests").toArray();
+
+                emit friendRequestsResult(requests);
                 continue;
             }
 
@@ -219,6 +229,15 @@ void NetworkClient::respondFriendRequest(const QString& requestId,
     json["request_id"] = requestId;
     json["user_id"] = userId;
     json["action"] = action;
+
+    sendJsonMessage(json);
+}
+
+void NetworkClient::requestFriendRequests(const QString& userId)
+{
+    QJsonObject json;
+    json["type"] = "get_friend_requests";
+    json["user_id"] = userId;
 
     sendJsonMessage(json);
 }

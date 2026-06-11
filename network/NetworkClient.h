@@ -5,6 +5,7 @@
 #include <QTcpSocket>
 #include <QString>
 #include <QJsonObject>
+#include <QJsonArray>
 
 class NetworkClient : public QObject
 {
@@ -23,6 +24,7 @@ public:
     void registerUser(const QString& username, const QString& password);
     void addFriend(const QString& userId,const QString& friendUsername);
     void respondFriendRequest(const QString& requestId,const QString& userId,const QString& action);
+    void requestFriendRequests(const QString& userId);
     
 
 signals:
@@ -36,6 +38,9 @@ signals:
     void addFriendResult(bool success,const QString& friendId,const QString& friendName,const QString& avatarPath,const QString& conversationId,const QString& errorText);
     void respondFriendRequestResult(bool success,const QString& action,const QString& friendId,const QString& friendName,const QString& avatarPath,
         const QString& conversationId,const QString& errorText);
+    void friendRequestsResult(const QJsonArray& requests);
+    void sendFriendRequestResult(bool success,const QString& requestId,const QString& toUserId,
+        const QString& toUserName,const QString& message,const QString& errorText);
 
 private:
     QTcpSocket *m_socket;
