@@ -22,6 +22,7 @@
 
 #include "dialog/LoginDialog.h"
 #include "dialog/RegisterDialog.h"
+#include "dialog/AddFriendDialog.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -77,6 +78,10 @@ private:
     DatabaseManager m_dbManager;
     AiService m_aiService;
     NetworkClient m_networkClient;
+    QPushButton *m_addFriendButton;
+    
+    QString m_pendingFriendRequestId;
+    QString m_pendingFriendRequestAction;
 
 private:
     // 初始化
@@ -121,6 +126,9 @@ private:
 
     // 显示辅助
     QString displayNameForSender(const QString& senderId) const;
+    void handleAddFriend();
+
+    void addOrUpdateContact(const Contact& contact);
 };
 
 #endif // MAINWINDOW_H

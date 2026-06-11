@@ -33,11 +33,7 @@ private:
     void handleLogin(QTcpSocket *clientSocket, const QJsonObject& json);
     void handleRegister(QTcpSocket *clientSocket, const QJsonObject& json);
 
-    void sendRegisterResult(QTcpSocket *clientSocket,
-                        bool success,
-                        const QString& userId,
-                        const QString& userName,
-                        const QString& errorText = QString());
+    void sendRegisterResult(QTcpSocket *clientSocket,bool success,const QString& userId,const QString& userName,const QString& errorText = QString());
 
     QString generateNextUserId();
     void sendLoginResult(QTcpSocket *clientSocket,bool success,const QString& userId,const QString& userName,const QString& errorText = QString());
@@ -52,6 +48,25 @@ private:
     bool forwardChatMessage(const QJsonObject& json);
     void deliverOfflineMessages(const QString& userId);
     void markMessageDelivered(const QString& messageId);
+    void handleAddFriend(QTcpSocket *clientSocket, const QJsonObject& json);
+
+    void sendAddFriendResult(QTcpSocket *clientSocket,bool success,const QString& friendId,const QString& friendName,const QString& avatarPath,const QString& conversationId,
+        const QString& errorText = QString());
+
+    bool ensureFriendship(const QString& userId,const QString& friendId);
+
+    bool ensurePrivateConversation(const QString& userId1,const QString& userId2);
+    void notifyContactsUpdated(const QString& userId);
+    void handleSendFriendRequest(QTcpSocket *clientSocket,const QJsonObject& json);
+
+    void sendFriendRequestResult(QTcpSocket *clientSocket,bool success,const QString& message,const QString& errorText = QString());
+
+    void notifyFriendRequestReceived(const QString& toUserId,const QString& requestId,const QString& fromUserId,const QString& fromUserName,const QString& message);
+
+    void handleRespondFriendRequest(QTcpSocket *clientSocket,const QJsonObject& json);
+
+    void sendRespondFriendRequestResult(QTcpSocket *clientSocket,bool success,const QString& action,const QString& friendId = QString(),const QString& friendName = QString(),
+        const QString& avatarPath = QString(),const QString& conversationId = QString(),const QString& errorText = QString());
 
     QTcpServer *m_server;
     QList<QTcpSocket*> m_clients;

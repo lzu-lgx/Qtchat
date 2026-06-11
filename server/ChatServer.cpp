@@ -94,6 +94,28 @@ bool ChatServer::initDatabase()
         return false;
     }
 
+    QString createFriendRequestsTable =
+    "CREATE TABLE IF NOT EXISTS friend_requests ("
+    "id TEXT PRIMARY KEY,"
+    "from_user_id TEXT NOT NULL,"
+    "from_user_name TEXT NOT NULL,"
+    "to_user_id TEXT NOT NULL,"
+    "to_user_name TEXT NOT NULL,"
+    "message TEXT,"
+    "status INTEGER NOT NULL DEFAULT 0,"
+    "created_at TEXT NOT NULL,"
+    "handled_at TEXT,"
+    "UNIQUE(from_user_id, to_user_id),"
+    "FOREIGN KEY(from_user_id) REFERENCES users(id),"
+    "FOREIGN KEY(to_user_id) REFERENCES users(id)"
+    ")";
+
+    if (!query.exec(createFriendRequestsTable)) {
+        qDebug() << "Failed to create friend_requests table:"
+                 << query.lastError().text();
+        return false;
+    }
+
     QString createConversationsTable =
         "CREATE TABLE IF NOT EXISTS conversations ("
         "id TEXT PRIMARY KEY,"
@@ -249,6 +271,17 @@ void ChatServer::handleJsonMessage(QTcpSocket *clientSocket,
 
     if (type == "get_contacts") {
         handleGetContacts(clientSocket, json);
+        return;
+    }
+
+    if (type == "send_friend_request") 
+    {
+        handleSendFriendRequest(clientSocket, json);
+        return;
+    }
+
+    if (type == "respond_friend_request") {
+        handleRespondFriendRequest(clientSocket, json);
         return;
     }
 
@@ -985,4 +1018,863 @@ void ChatServer::sendRegisterResult(QTcpSocket *clientSocket,
     clientSocket->flush();
 
     qDebug() << "Sent register result:" << response;
+}
+
+void ChatServer::handleAddFriend(QTcpSocket *clientSocket,
+                                 const QJsonObject& json)
+{
+    QString userId = json.value("user_id").toString().trimmed();
+    QString friendUsername = json.value("friend_username").toString().trimmed();
+
+    if (userId.isEmpty()) {
+        sendAddFriendResult(clientSocket,
+                            false,
+                            "",
+                            "",
+                            "",
+                            "",
+                            "当前用户ID为空");
+        return;
+    }
+
+    if (friendUsername.isEmpty()) {
+        sendAddFriendResult(clientSocket,
+                            false,
+                            "",
+                            "",
+                            "",
+                            "",
+                            "好友用户名不能为空");
+        return;
+    }
+
+    QSqlQuery userQuery(m_db);
+
+    userQuery.prepare(
+        "SELECT id, username, avatar_path "
+        "FROM users "
+        "WHERE username = ?"
+    );
+
+    userQuery.addBindValue(friendUsername);
+
+    if (!userQuery.exec()) {
+        qDebug() << "Failed to query friend user:"
+                 << userQuery.lastError().text();
+
+        sendAddFriendResult(clientSocket,
+                            false,
+                            "",
+                            "",
+                            "",
+                            "",
+                            "查询用户失败");
+        return;
+    }
+
+    if (!userQuery.next()) {
+        sendAddFriendResult(clientSocket,
+                            false,
+                            "",
+                            "",
+                            "",
+                            "",
+                            "用户不存在");
+        return;
+    }
+
+    QString friendId = userQuery.value(0).toString();
+    QString friendName = userQuery.value(1).toString();
+    QString avatarPath = userQuery.value(2).toString();
+
+    if (friendId == userId) {
+        sendAddFriendResult(clientSocket,
+                            false,
+                            "",
+                            "",
+                            "",
+                            "",
+                            "不能添加自己为好友");
+        return;
+    }
+
+    QSqlQuery checkQuery(m_db);
+
+    checkQuery.prepare(
+        "SELECT id "
+        "FROM friendships "
+        "WHERE user_id = ? AND friend_id = ?"
+    );
+
+    checkQuery.addBindValue(userId);
+    checkQuery.addBindValue(friendId);
+
+    if (!checkQuery.exec()) {
+        qDebug() << "Failed to check friendship:"
+                 << checkQuery.lastError().text();
+
+        sendAddFriendResult(clientSocket,
+                            false,
+                            "",
+                            "",
+                            "",
+                            "",
+                            "检查好友关系失败");
+        return;
+    }
+
+    if (checkQuery.next()) {
+        sendAddFriendResult(clientSocket,
+                            false,
+                            friendId,
+                            friendName,
+                            avatarPath,
+                            privateConversationIdForUsers(userId, friendId),
+                            "已经是好友");
+        return;
+    }
+
+    if (!ensureFriendship(userId, friendId)) {
+        sendAddFriendResult(clientSocket,
+                            false,
+                            "",
+                            "",
+                            "",
+                            "",
+                            "添加好友失败");
+        return;
+    }
+
+    if (!ensurePrivateConversation(userId, friendId)) {
+        sendAddFriendResult(clientSocket,
+                            false,
+                            "",
+                            "",
+                            "",
+                            "",
+                            "创建私聊会话失败");
+        return;
+    }
+
+    QString conversationId = privateConversationIdForUsers(userId, friendId);
+
+    qDebug() << "Add friend success:"
+             << userId
+             << "->"
+             << friendId
+             << friendName;
+
+    sendAddFriendResult(clientSocket,
+                        true,
+                        friendId,
+                        friendName,
+                        avatarPath,
+                        conversationId);
+    
+    notifyContactsUpdated(userId);
+    notifyContactsUpdated(friendId);
+}
+
+void ChatServer::sendAddFriendResult(QTcpSocket *clientSocket,
+                                     bool success,
+                                     const QString& friendId,
+                                     const QString& friendName,
+                                     const QString& avatarPath,
+                                     const QString& conversationId,
+                                     const QString& errorText)
+{
+    if (!clientSocket ||
+        clientSocket->state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+
+    QJsonObject response;
+    response["type"] = "add_friend_result";
+    response["success"] = success;
+
+    if (success) {
+        response["friend_id"] = friendId;
+        response["friend_name"] = friendName;
+        response["avatar_path"] = avatarPath;
+        response["conversation_id"] = conversationId;
+    } else {
+        response["error"] = errorText;
+
+        if (!friendId.isEmpty()) {
+            response["friend_id"] = friendId;
+        }
+
+        if (!friendName.isEmpty()) {
+            response["friend_name"] = friendName;
+        }
+
+        if (!conversationId.isEmpty()) {
+            response["conversation_id"] = conversationId;
+        }
+    }
+
+    QJsonDocument doc(response);
+    QByteArray data = doc.toJson(QJsonDocument::Compact);
+    data.append('\n');
+
+    clientSocket->write(data);
+    clientSocket->flush();
+
+    qDebug() << "Sent add friend result:" << response;
+}
+
+bool ChatServer::ensureFriendship(const QString& userId,
+                                  const QString& friendId)
+{
+    QString now = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+    QString firstFriendshipId =
+        "friend_" + userId + "_" + friendId;
+
+    QString secondFriendshipId =
+        "friend_" + friendId + "_" + userId;
+
+    QSqlQuery query(m_db);
+
+    query.prepare(
+        "INSERT OR IGNORE INTO friendships "
+        "(id, user_id, friend_id, created_at) "
+        "VALUES (?, ?, ?, ?)"
+    );
+
+    query.addBindValue(firstFriendshipId);
+    query.addBindValue(userId);
+    query.addBindValue(friendId);
+    query.addBindValue(now);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to insert friendship:"
+                 << query.lastError().text();
+        return false;
+    }
+
+    query.prepare(
+        "INSERT OR IGNORE INTO friendships "
+        "(id, user_id, friend_id, created_at) "
+        "VALUES (?, ?, ?, ?)"
+    );
+
+    query.addBindValue(secondFriendshipId);
+    query.addBindValue(friendId);
+    query.addBindValue(userId);
+    query.addBindValue(now);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to insert reverse friendship:"
+                 << query.lastError().text();
+        return false;
+    }
+
+    return true;
+}
+
+bool ChatServer::ensurePrivateConversation(const QString& userId1,
+                                           const QString& userId2)
+{
+    QString conversationId = privateConversationIdForUsers(userId1, userId2);
+    QString now = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+    QSqlQuery query(m_db);
+
+    query.prepare(
+        "INSERT OR IGNORE INTO conversations "
+        "(id, type, title, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?)"
+    );
+
+    query.addBindValue(conversationId);
+    query.addBindValue(1);
+    query.addBindValue("");
+    query.addBindValue(now);
+    query.addBindValue(now);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to ensure private conversation:"
+                 << query.lastError().text();
+        return false;
+    }
+
+    query.prepare(
+        "INSERT OR IGNORE INTO conversation_members "
+        "(id, conversation_id, user_id, joined_at, is_hidden) "
+        "VALUES (?, ?, ?, ?, ?)"
+    );
+
+    query.addBindValue("member_" + conversationId + "_" + userId1);
+    query.addBindValue(conversationId);
+    query.addBindValue(userId1);
+    query.addBindValue(now);
+    query.addBindValue(0);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to ensure conversation member:"
+                 << query.lastError().text();
+        return false;
+    }
+
+    query.prepare(
+        "INSERT OR IGNORE INTO conversation_members "
+        "(id, conversation_id, user_id, joined_at, is_hidden) "
+        "VALUES (?, ?, ?, ?, ?)"
+    );
+
+    query.addBindValue("member_" + conversationId + "_" + userId2);
+    query.addBindValue(conversationId);
+    query.addBindValue(userId2);
+    query.addBindValue(now);
+    query.addBindValue(0);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to ensure reverse conversation member:"
+                 << query.lastError().text();
+        return false;
+    }
+
+    return true;
+}
+
+void ChatServer::notifyContactsUpdated(const QString& userId)
+{
+    QTcpSocket *targetSocket = m_userSockets.value(userId, nullptr);
+
+    if (!targetSocket ||
+        targetSocket->state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+
+    QJsonObject json;
+    json["type"] = "contacts_updated";
+    json["user_id"] = userId;
+
+    QJsonDocument doc(json);
+    QByteArray data = doc.toJson(QJsonDocument::Compact);
+    data.append('\n');
+
+    targetSocket->write(data);
+    targetSocket->flush();
+
+    qDebug() << "Notified contacts updated:" << userId;
+}
+
+void ChatServer::handleSendFriendRequest(QTcpSocket *clientSocket,
+                                         const QJsonObject& json)
+{
+    QString fromUserId = json.value("from_user_id").toString().trimmed();
+    QString friendUsername = json.value("friend_username").toString().trimmed();
+    QString requestMessage = json.value("message").toString().trimmed();
+
+    if (fromUserId.isEmpty()) {
+        sendFriendRequestResult(clientSocket,
+                                false,
+                                "",
+                                "当前用户ID为空");
+        return;
+    }
+
+    if (friendUsername.isEmpty()) {
+        sendFriendRequestResult(clientSocket,
+                                false,
+                                "",
+                                "好友用户名不能为空");
+        return;
+    }
+
+    QSqlQuery fromUserQuery(m_db);
+    fromUserQuery.prepare(
+        "SELECT username FROM users WHERE id = ?"
+    );
+    fromUserQuery.addBindValue(fromUserId);
+
+    if (!fromUserQuery.exec() || !fromUserQuery.next()) {
+        sendFriendRequestResult(clientSocket,
+                                false,
+                                "",
+                                "当前用户不存在");
+        return;
+    }
+
+    QString fromUserName = fromUserQuery.value(0).toString();
+
+    QSqlQuery toUserQuery(m_db);
+    toUserQuery.prepare(
+        "SELECT id, username FROM users WHERE username = ?"
+    );
+    toUserQuery.addBindValue(friendUsername);
+
+    if (!toUserQuery.exec()) {
+        qDebug() << "Failed to query target user:"
+                 << toUserQuery.lastError().text();
+
+        sendFriendRequestResult(clientSocket,
+                                false,
+                                "",
+                                "查询用户失败");
+        return;
+    }
+
+    if (!toUserQuery.next()) {
+        sendFriendRequestResult(clientSocket,
+                                false,
+                                "",
+                                "用户不存在");
+        return;
+    }
+
+    QString toUserId = toUserQuery.value(0).toString();
+    QString toUserName = toUserQuery.value(1).toString();
+
+    if (toUserId == fromUserId) {
+        sendFriendRequestResult(clientSocket,
+                                false,
+                                "",
+                                "不能添加自己为好友");
+        return;
+    }
+
+    QSqlQuery friendshipQuery(m_db);
+    friendshipQuery.prepare(
+        "SELECT id FROM friendships "
+        "WHERE user_id = ? AND friend_id = ?"
+    );
+    friendshipQuery.addBindValue(fromUserId);
+    friendshipQuery.addBindValue(toUserId);
+
+    if (!friendshipQuery.exec()) {
+        qDebug() << "Failed to check friendship:"
+                 << friendshipQuery.lastError().text();
+
+        sendFriendRequestResult(clientSocket,
+                                false,
+                                "",
+                                "检查好友关系失败");
+        return;
+    }
+
+    if (friendshipQuery.next()) {
+        sendFriendRequestResult(clientSocket,
+                                false,
+                                "",
+                                "已经是好友");
+        return;
+    }
+
+    QSqlQuery requestQuery(m_db);
+    requestQuery.prepare(
+        "SELECT id, status FROM friend_requests "
+        "WHERE from_user_id = ? AND to_user_id = ?"
+    );
+    requestQuery.addBindValue(fromUserId);
+    requestQuery.addBindValue(toUserId);
+
+    if (!requestQuery.exec()) {
+        qDebug() << "Failed to check friend request:"
+                 << requestQuery.lastError().text();
+
+        sendFriendRequestResult(clientSocket,
+                                false,
+                                "",
+                                "检查好友申请失败");
+        return;
+    }
+
+    if (requestQuery.next()) {
+        int status = requestQuery.value(1).toInt();
+
+        if (status == 0) {
+            sendFriendRequestResult(clientSocket,
+                                    false,
+                                    "",
+                                    "好友申请已发送，等待对方处理");
+            return;
+        }
+
+        // 如果之前被拒绝，可以重新发送，更新为 pending
+        QString requestId = requestQuery.value(0).toString();
+        QString now = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+        QSqlQuery updateQuery(m_db);
+        updateQuery.prepare(
+            "UPDATE friend_requests "
+            "SET status = 0, message = ?, created_at = ?, handled_at = NULL "
+            "WHERE id = ?"
+        );
+        updateQuery.addBindValue(requestMessage);
+        updateQuery.addBindValue(now);
+        updateQuery.addBindValue(requestId);
+
+        if (!updateQuery.exec()) {
+            qDebug() << "Failed to update friend request:"
+                     << updateQuery.lastError().text();
+
+            sendFriendRequestResult(clientSocket,
+                                    false,
+                                    "",
+                                    "重新发送好友申请失败");
+            return;
+        }
+
+        sendFriendRequestResult(clientSocket,
+                                true,
+                                "好友申请已发送");
+
+        notifyFriendRequestReceived(toUserId,
+                                    requestId,
+                                    fromUserId,
+                                    fromUserName,
+                                    requestMessage);
+        return;
+    }
+
+    QString requestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    QString now = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+    QSqlQuery insertQuery(m_db);
+    insertQuery.prepare(
+        "INSERT INTO friend_requests "
+        "(id, from_user_id, from_user_name, to_user_id, to_user_name, message, status, created_at, handled_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    );
+
+    insertQuery.addBindValue(requestId);
+    insertQuery.addBindValue(fromUserId);
+    insertQuery.addBindValue(fromUserName);
+    insertQuery.addBindValue(toUserId);
+    insertQuery.addBindValue(toUserName);
+    insertQuery.addBindValue(requestMessage);
+    insertQuery.addBindValue(0);
+    insertQuery.addBindValue(now);
+    insertQuery.addBindValue("");
+
+    if (!insertQuery.exec()) {
+        qDebug() << "Failed to insert friend request:"
+                 << insertQuery.lastError().text();
+
+        sendFriendRequestResult(clientSocket,
+                                false,
+                                "",
+                                "发送好友申请失败");
+        return;
+    }
+
+    qDebug() << "Friend request created:"
+             << requestId
+             << fromUserId
+             << "->"
+             << toUserId;
+
+    sendFriendRequestResult(clientSocket,
+                            true,
+                            "好友申请已发送");
+
+    notifyFriendRequestReceived(toUserId,
+                                requestId,
+                                fromUserId,
+                                fromUserName,
+                                requestMessage);
+}
+
+void ChatServer::sendFriendRequestResult(QTcpSocket *clientSocket,
+                                         bool success,
+                                         const QString& message,
+                                         const QString& errorText)
+{
+    if (!clientSocket ||
+        clientSocket->state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+
+    QJsonObject response;
+    response["type"] = "send_friend_request_result";
+    response["success"] = success;
+
+    if (success) {
+        response["message"] = message;
+    } else {
+        response["error"] = errorText;
+    }
+
+    QJsonDocument doc(response);
+    QByteArray data = doc.toJson(QJsonDocument::Compact);
+    data.append('\n');
+
+    clientSocket->write(data);
+    clientSocket->flush();
+
+    qDebug() << "Sent friend request result:" << response;
+}
+
+void ChatServer::notifyFriendRequestReceived(const QString& toUserId,
+                                             const QString& requestId,
+                                             const QString& fromUserId,
+                                             const QString& fromUserName,
+                                             const QString& message)
+{
+    QTcpSocket *targetSocket = m_userSockets.value(toUserId, nullptr);
+
+    if (!targetSocket ||
+        targetSocket->state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+
+    QJsonObject json;
+    json["type"] = "friend_request_received";
+    json["request_id"] = requestId;
+    json["from_user_id"] = fromUserId;
+    json["from_user_name"] = fromUserName;
+    json["message"] = message;
+
+    QJsonDocument doc(json);
+    QByteArray data = doc.toJson(QJsonDocument::Compact);
+    data.append('\n');
+
+    targetSocket->write(data);
+    targetSocket->flush();
+
+    qDebug() << "Notified friend request received:"
+             << toUserId
+             << "from"
+             << fromUserId;
+}
+
+void ChatServer::handleRespondFriendRequest(QTcpSocket *clientSocket,
+                                            const QJsonObject& json)
+{
+    QString requestId = json.value("request_id").toString().trimmed();
+    QString userId = json.value("user_id").toString().trimmed();
+    QString action = json.value("action").toString().trimmed();
+
+    if (requestId.isEmpty()) {
+        sendRespondFriendRequestResult(clientSocket,
+                                       false,
+                                       action,
+                                       "",
+                                       "",
+                                       "",
+                                       "",
+                                       "好友申请ID为空");
+        return;
+    }
+
+    if (userId.isEmpty()) {
+        sendRespondFriendRequestResult(clientSocket,
+                                       false,
+                                       action,
+                                       "",
+                                       "",
+                                       "",
+                                       "",
+                                       "当前用户ID为空");
+        return;
+    }
+
+    if (action != "accept" && action != "reject") {
+        sendRespondFriendRequestResult(clientSocket,
+                                       false,
+                                       action,
+                                       "",
+                                       "",
+                                       "",
+                                       "",
+                                       "无效的处理操作");
+        return;
+    }
+
+    QSqlQuery query(m_db);
+
+    query.prepare(
+        "SELECT from_user_id, from_user_name, to_user_id, to_user_name, status "
+        "FROM friend_requests "
+        "WHERE id = ?"
+    );
+
+    query.addBindValue(requestId);
+
+    if (!query.exec()) {
+        qDebug() << "Failed to query friend request:"
+                 << query.lastError().text();
+
+        sendRespondFriendRequestResult(clientSocket,
+                                       false,
+                                       action,
+                                       "",
+                                       "",
+                                       "",
+                                       "",
+                                       "查询好友申请失败");
+        return;
+    }
+
+    if (!query.next()) {
+        sendRespondFriendRequestResult(clientSocket,
+                                       false,
+                                       action,
+                                       "",
+                                       "",
+                                       "",
+                                       "",
+                                       "好友申请不存在");
+        return;
+    }
+
+    QString fromUserId = query.value(0).toString();
+    QString fromUserName = query.value(1).toString();
+    QString toUserId = query.value(2).toString();
+    QString toUserName = query.value(3).toString();
+    int status = query.value(4).toInt();
+
+    if (toUserId != userId) {
+        sendRespondFriendRequestResult(clientSocket,
+                                       false,
+                                       action,
+                                       "",
+                                       "",
+                                       "",
+                                       "",
+                                       "你无权处理该好友申请");
+        return;
+    }
+
+    if (status != 0) {
+        sendRespondFriendRequestResult(clientSocket,
+                                       false,
+                                       action,
+                                       "",
+                                       "",
+                                       "",
+                                       "",
+                                       "该好友申请已处理");
+        return;
+    }
+
+    int newStatus = (action == "accept") ? 1 : 2;
+    QString now = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+    QSqlQuery updateQuery(m_db);
+
+    updateQuery.prepare(
+        "UPDATE friend_requests "
+        "SET status = ?, handled_at = ? "
+        "WHERE id = ?"
+    );
+
+    updateQuery.addBindValue(newStatus);
+    updateQuery.addBindValue(now);
+    updateQuery.addBindValue(requestId);
+
+    if (!updateQuery.exec()) {
+        qDebug() << "Failed to update friend request:"
+                 << updateQuery.lastError().text();
+
+        sendRespondFriendRequestResult(clientSocket,
+                                       false,
+                                       action,
+                                       "",
+                                       "",
+                                       "",
+                                       "",
+                                       "更新好友申请状态失败");
+        return;
+    }
+
+    QString conversationId;
+
+    if (action == "accept") {
+        if (!ensureFriendship(fromUserId, toUserId)) {
+            sendRespondFriendRequestResult(clientSocket,
+                                           false,
+                                           action,
+                                           "",
+                                           "",
+                                           "",
+                                           "",
+                                           "建立好友关系失败");
+            return;
+        }
+
+        if (!ensurePrivateConversation(fromUserId, toUserId)) {
+            sendRespondFriendRequestResult(clientSocket,
+                                           false,
+                                           action,
+                                           "",
+                                           "",
+                                           "",
+                                           "",
+                                           "创建私聊会话失败");
+            return;
+        }
+
+        conversationId = privateConversationIdForUsers(fromUserId, toUserId);
+    }
+
+    qDebug() << "Friend request responded:"
+             << requestId
+             << "action:"
+             << action;
+
+    if (action == "accept") {
+        // 当前处理申请的人是 toUserId，所以它的新好友是 fromUserId
+        sendRespondFriendRequestResult(clientSocket,
+                                       true,
+                                       action,
+                                       fromUserId,
+                                       fromUserName,
+                                       "",
+                                       conversationId,
+                                       "");
+
+        notifyContactsUpdated(fromUserId);
+        notifyContactsUpdated(toUserId);
+    } else {
+        sendRespondFriendRequestResult(clientSocket,
+                                       true,
+                                       action,
+                                       "",
+                                       "",
+                                       "",
+                                       "",
+                                       "");
+    }
+}
+
+void ChatServer::sendRespondFriendRequestResult(QTcpSocket *clientSocket,
+                                                bool success,
+                                                const QString& action,
+                                                const QString& friendId,
+                                                const QString& friendName,
+                                                const QString& avatarPath,
+                                                const QString& conversationId,
+                                                const QString& errorText)
+{
+    if (!clientSocket ||
+        clientSocket->state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+
+    QJsonObject response;
+    response["type"] = "respond_friend_request_result";
+    response["success"] = success;
+    response["action"] = action;
+
+    if (success) {
+        response["friend_id"] = friendId;
+        response["friend_name"] = friendName;
+        response["avatar_path"] = avatarPath;
+        response["conversation_id"] = conversationId;
+    } else {
+        response["error"] = errorText;
+    }
+
+    QJsonDocument doc(response);
+    QByteArray data = doc.toJson(QJsonDocument::Compact);
+    data.append('\n');
+
+    clientSocket->write(data);
+    clientSocket->flush();
+
+    qDebug() << "Sent respond friend request result:" << response;
 }

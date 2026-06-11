@@ -16,6 +16,7 @@
 #include <QMessageBox>
 #include <QEventLoop>
 #include "config/AppConfig.h"
+#include <QTimer>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -36,6 +37,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_conversationModeButton(nullptr)
     , m_contactsModeButton(nullptr)
     , m_leftListMode(LeftListMode::Conversations)
+    , m_addFriendButton(nullptr)
 {
     ui->setupUi(this);
 
@@ -54,53 +56,71 @@ MainWindow::~MainWindow()
 
 void MainWindow::setupChatUi()
 {
-    QWidget *central = new QWidget(this);
-    setCentralWidget(central);
+    // Central widget
+QWidget *central = new QWidget(this);
+setCentralWidget(central);
 
-    QHBoxLayout *mainLayout = new QHBoxLayout(central);
+// 主布局
+QHBoxLayout *mainLayout = new QHBoxLayout(central);
 
-    QWidget *leftPanel = new QWidget(central);
-    leftPanel->setFixedWidth(220);
-    QVBoxLayout *leftLayout = new QVBoxLayout(leftPanel);
+// 左侧面板
+QWidget *leftPanel = new QWidget(central);
+leftPanel->setFixedWidth(220);
+QVBoxLayout *leftLayout = new QVBoxLayout(leftPanel);
+leftLayout->setContentsMargins(8, 8, 8, 8);
+leftLayout->setSpacing(8);
 
-    m_conversationModeButton = new QPushButton("会话列表", leftPanel);
-    m_contactsModeButton = new QPushButton("通讯录", leftPanel);
-    m_conversationList = new QListWidget(leftPanel);
-    
+// 左侧顶部按钮
+m_conversationModeButton = new QPushButton("会话列表", leftPanel);
+m_contactsModeButton = new QPushButton("通讯录", leftPanel);
+m_addFriendButton = new QPushButton("添加好友", leftPanel);
+m_addFriendButton->setVisible(false); // 默认隐藏
 
-    QWidget *chatWidget = new QWidget(central);
-    QVBoxLayout *chatLayout = new QVBoxLayout(chatWidget);
+// 会话/联系人列表
+m_conversationList = new QListWidget(leftPanel);
 
-    m_chatTitleLabel = new QLabel("请选择一个会话", chatWidget);
-    m_chatTitleLabel->setMinimumHeight(40);
+// 横向按钮布局
+QHBoxLayout *modeButtonLayout = new QHBoxLayout;
+modeButtonLayout->setSpacing(8);
+modeButtonLayout->addWidget(m_conversationModeButton);
+modeButtonLayout->addWidget(m_contactsModeButton);
 
-    m_messageDisplay = new QTextEdit(chatWidget);
-    m_messageDisplay->setReadOnly(true);
+// 将左侧按钮和列表加入左侧垂直布局
+leftLayout->addLayout(modeButtonLayout);
+leftLayout->addWidget(m_addFriendButton);
+leftLayout->addWidget(m_conversationList);
 
-    QWidget *inputWidget = new QWidget(chatWidget);
-    QHBoxLayout *inputLayout = new QHBoxLayout(inputWidget);
+// 聊天右侧面板
+QWidget *chatWidget = new QWidget(central);
+QVBoxLayout *chatLayout = new QVBoxLayout(chatWidget);
+chatLayout->setContentsMargins(0, 0, 0, 0);
+chatLayout->setSpacing(8);
 
-    m_messageInput = new QLineEdit(inputWidget);
-    m_messageInput->setPlaceholderText("请输入消息...");
+m_chatTitleLabel = new QLabel("请选择一个会话", chatWidget);
+m_chatTitleLabel->setMinimumHeight(40);
 
-    m_sendButton = new QPushButton("发送", inputWidget);
+m_messageDisplay = new QTextEdit(chatWidget);
+m_messageDisplay->setReadOnly(true);
 
-    inputLayout->addWidget(m_messageInput);
-    inputLayout->addWidget(m_sendButton);
+QWidget *inputWidget = new QWidget(chatWidget);
+QHBoxLayout *inputLayout = new QHBoxLayout(inputWidget);
+inputLayout->setContentsMargins(0, 0, 0, 0);
+inputLayout->setSpacing(8);
 
-    chatLayout->addWidget(m_chatTitleLabel);
-    chatLayout->addWidget(m_messageDisplay);
-    chatLayout->addWidget(inputWidget);
-    
-    QHBoxLayout *modeButtonLayout = new QHBoxLayout;
-    modeButtonLayout->addWidget(m_conversationModeButton);
-    modeButtonLayout->addWidget(m_contactsModeButton);
+m_messageInput = new QLineEdit(inputWidget);
+m_messageInput->setPlaceholderText("请输入消息...");
+m_sendButton = new QPushButton("发送", inputWidget);
 
-    leftLayout->addLayout(modeButtonLayout);
-    leftLayout->addWidget(m_conversationList);
+inputLayout->addWidget(m_messageInput);
+inputLayout->addWidget(m_sendButton);
 
-    mainLayout->addWidget(leftPanel);
-    mainLayout->addWidget(chatWidget);
+chatLayout->addWidget(m_chatTitleLabel);
+chatLayout->addWidget(m_messageDisplay);
+chatLayout->addWidget(inputWidget);
+
+// 添加到主布局
+mainLayout->addWidget(leftPanel);
+mainLayout->addWidget(chatWidget);
 
     connect(m_conversationList, &QListWidget::itemClicked,
         this, [this](QListWidgetItem *item)
@@ -213,6 +233,11 @@ void MainWindow::setupChatUi()
         showMessagesForConversation(conversationId);
         }
     });
+    connect(m_addFriendButton, &QPushButton::clicked,
+        this, [this]()
+{
+    handleAddFriend();
+});
 
 }
 
@@ -372,8 +397,53 @@ void MainWindow::setupNetwork()
             return;
         }
 
+        if (type == "contacts_updated") {
+            qDebug() << "Contacts updated notification received";
+            m_networkClient.requestContacts(m_userId);
+            return;
+        }
+
         if (type == "chat_message") {
             handleJsonNetworkMessage(message);
+            return;
+        }
+
+        if (type == "friend_request_received") {
+            QString requestId = message.value("request_id").toString();
+            QString fromUserName = message.value("from_user_name").toString();
+            QString requestMessage = message.value("message").toString();
+
+            QMessageBox::StandardButton reply = QMessageBox::question(this,"好友申请",fromUserName + " 请求添加你为好友。\n"+ requestMessage + "\n\n是否同意？",
+            QMessageBox::Yes | QMessageBox::No);
+
+            QString action = (reply == QMessageBox::Yes) ? "accept" : "reject";
+
+            qDebug()<< "Respond friend request:"
+                    << "requestId =" << requestId
+                    << "userId =" << m_userId
+                    << "action =" << action;
+
+            m_networkClient.respondFriendRequest(requestId, m_userId, action);
+
+    // 关键修复：
+    // 同意后，当前客户端主动延迟刷新通讯录。
+    // 延迟是为了等服务端先完成 friendships 写入。
+            if (action == "accept") {
+                QTimer::singleShot(300, this, [this]() {
+                    qDebug() << "Force refresh contacts after accepting friend request:"
+                            << m_userId;
+
+                    m_networkClient.requestContacts(m_userId);
+                });
+
+                QTimer::singleShot(1000, this, [this]() {
+                qDebug() << "Force refresh contacts again after accepting friend request:"
+                        << m_userId;
+
+                m_networkClient.requestContacts(m_userId);
+                });
+            }
+
             return;
         }
 
@@ -385,6 +455,49 @@ void MainWindow::setupNetwork()
     {
         qDebug() << "Network error:" << errorText;
     });
+
+    connect(&m_networkClient, &NetworkClient::respondFriendRequestResult,
+        this,
+        [this](bool success,
+               const QString& action,
+               const QString& friendId,
+               const QString& friendName,
+               const QString& avatarPath,
+               const QString& conversationId,
+               const QString& errorText)
+{
+    Q_UNUSED(conversationId);
+
+    if (!success) {
+        QMessageBox::warning(this,
+                             "好友申请",
+                             errorText.isEmpty() ? "处理好友申请失败" : errorText);
+        return;
+    }
+
+    if (action == "accept") {
+        if (!friendId.isEmpty()) {
+            Contact newContact(friendId, friendName, avatarPath);
+            addOrUpdateContact(newContact);
+        }
+
+        QMessageBox::information(this, "好友申请", "已同意好友申请");
+
+        // 关键：先立刻刷新当前本地列表
+        if (m_leftListMode == LeftListMode::Contacts) {
+            showContactListMode();
+        }
+
+        // 再向服务端拉一次权威通讯录
+        m_networkClient.requestContacts(m_userId);
+        return;
+    }
+
+    if (action == "reject") {
+        QMessageBox::information(this, "好友申请", "已拒绝好友申请");
+        return;
+    }
+});
 
     m_networkClient.connectToServer("127.0.0.1", 8888);
 }
@@ -847,7 +960,9 @@ void MainWindow::showConversationListMode()
 {
     m_leftListMode = LeftListMode::Conversations;
 
-    
+    if (m_addFriendButton) {
+        m_addFriendButton->setVisible(false);
+    }
 
     loadConversations();
 }
@@ -856,7 +971,9 @@ void MainWindow::showContactListMode()
 {
     m_leftListMode = LeftListMode::Contacts;
 
-    
+    if (m_addFriendButton) {
+        m_addFriendButton->setVisible(true);
+    }
 
     m_conversationList->clear();
 
@@ -869,6 +986,7 @@ void MainWindow::showContactListMode()
 
     if (m_contacts.isEmpty()) {
         QListWidgetItem *item = new QListWidgetItem("暂无联系人");
+        item->setData(Qt::UserRole, "");
         item->setFlags(item->flags() & ~Qt::ItemIsSelectable);
         m_conversationList->addItem(item);
     }
@@ -913,4 +1031,105 @@ void MainWindow::openConversationWithContact(const Contact& contact)
 
     m_chatTitleLabel->setText(contact.userName());
     showMessagesForConversation(conversationId);
+}
+
+void MainWindow::handleAddFriend()
+{
+    AddFriendDialog dialog(this);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    QString friendUsername = dialog.friendUsername();
+
+    if (friendUsername.isEmpty()) {
+        QMessageBox::warning(this, "添加好友失败", "好友用户名不能为空");
+        return;
+    }
+
+    if (friendUsername == m_userName) {
+        QMessageBox::warning(this, "添加好友失败", "不能添加自己为好友");
+        return;
+    }
+
+    if (!m_networkClient.isConnected()) {
+        QMessageBox::warning(this, "添加好友失败", "尚未连接到服务器");
+        return;
+    }
+
+    QEventLoop loop;
+
+    bool finished = false;
+    bool addSuccess = false;
+    QString friendId;
+    QString friendName;
+    QString avatarPath;
+    QString conversationId;
+    QString errorText;
+
+    QMetaObject::Connection connection =
+        connect(&m_networkClient, &NetworkClient::addFriendResult,
+                &loop,
+                [&](bool success,
+                    const QString& resultFriendId,
+                    const QString& resultFriendName,
+                    const QString& resultAvatarPath,
+                    const QString& resultConversationId,
+                    const QString& resultErrorText)
+    {
+        finished = true;
+        addSuccess = success;
+        friendId = resultFriendId;
+        friendName = resultFriendName;
+        avatarPath = resultAvatarPath;
+        conversationId = resultConversationId;
+        errorText = resultErrorText;
+
+        loop.quit();
+    });
+
+    m_networkClient.addFriend(m_userId, friendUsername);
+
+    loop.exec();
+
+    disconnect(connection);
+
+    if (!finished) {
+        QMessageBox::warning(this, "添加好友失败", "添加好友请求未完成");
+        return;
+    }
+
+    if (!addSuccess) {
+        QMessageBox::warning(this, "添加好友失败", errorText);
+        return;
+    }
+
+    bool exists = false;
+
+    for (const Contact& contact : m_contacts) {
+        if (contact.userId() == friendId) {
+            exists = true;
+            break;
+        }
+    }
+
+    QMessageBox::information(this,"好友申请","好友申请已发送，等待对方同意。");
+}
+
+void MainWindow::addOrUpdateContact(const Contact& contact)
+{
+    if (contact.userId().isEmpty()) {
+        return;
+    }
+
+    for (Contact& existingContact : m_contacts) {
+        if (existingContact.userId() == contact.userId()) {
+            existingContact.setUserName(contact.userName());
+            existingContact.setAvatarPath(contact.avatarPath());
+            return;
+        }
+    }
+
+    m_contacts.append(contact);
 }

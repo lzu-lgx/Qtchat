@@ -80,6 +80,29 @@ NetworkClient::NetworkClient(QObject *parent)
                 continue;
             }
 
+            if (type == "send_friend_request_result")
+            {
+                bool success = obj.value("success").toBool();
+                QString message = obj.value("message").toString();
+                QString errorText = obj.value("error").toString();
+
+                emit addFriendResult(success,"","","","",success ? message : errorText);
+                continue;
+            }
+
+            if (type == "respond_friend_request_result") {
+                bool success = obj.value("success").toBool();
+                QString action = obj.value("action").toString();
+                QString friendId = obj.value("friend_id").toString();
+                QString friendName = obj.value("friend_name").toString();
+                QString avatarPath = obj.value("avatar_path").toString();
+                QString conversationId = obj.value("conversation_id").toString();
+                QString errorText = obj.value("error").toString();
+
+                emit respondFriendRequestResult(success,action,friendId,friendName,avatarPath,conversationId,errorText);
+                continue;
+            }
+
             emit jsonMessageReceived(obj);
         }
     });
@@ -171,6 +194,31 @@ void NetworkClient::registerUser(const QString& username,
     json["type"] = "register";
     json["username"] = username;
     json["password"] = password;
+
+    sendJsonMessage(json);
+}
+
+void NetworkClient::addFriend(const QString& userId,
+                              const QString& friendUsername)
+{
+    QJsonObject json;
+    json["type"] = "send_friend_request";
+    json["from_user_id"] = userId;
+    json["friend_username"] = friendUsername;
+    json["message"] = "请求添加你为好友";
+
+    sendJsonMessage(json);
+}
+
+void NetworkClient::respondFriendRequest(const QString& requestId,
+                                         const QString& userId,
+                                         const QString& action)
+{
+    QJsonObject json;
+    json["type"] = "respond_friend_request";
+    json["request_id"] = requestId;
+    json["user_id"] = userId;
+    json["action"] = action;
 
     sendJsonMessage(json);
 }

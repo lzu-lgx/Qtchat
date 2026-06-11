@@ -21,6 +21,9 @@ public:
     void requestContacts(const QString& userId);
     void login(const QString& username, const QString& password);
     void registerUser(const QString& username, const QString& password);
+    void addFriend(const QString& userId,const QString& friendUsername);
+    void respondFriendRequest(const QString& requestId,const QString& userId,const QString& action);
+    
 
 signals:
     void connected();
@@ -30,6 +33,9 @@ signals:
     void jsonMessageReceived(const QJsonObject& message);
     void loginResult(bool success,const QString& userId,const QString& userName,const QString& databaseName,const QString& errorText);
     void registerResult(bool success,const QString& userId,const QString& userName,const QString& errorText);
+    void addFriendResult(bool success,const QString& friendId,const QString& friendName,const QString& avatarPath,const QString& conversationId,const QString& errorText);
+    void respondFriendRequestResult(bool success,const QString& action,const QString& friendId,const QString& friendName,const QString& avatarPath,
+        const QString& conversationId,const QString& errorText);
 
 private:
     QTcpSocket *m_socket;
