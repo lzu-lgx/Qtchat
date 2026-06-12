@@ -6,13 +6,14 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QLabel>
-#include <QTextBrowser>
+#include<QScrollArea>
 #include<QTextEdit>
 #include<QUrl>
 #include <QLineEdit>
 #include <QString>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QVBoxLayout>
 
 #include "model/Conversation.h"
 #include "model/Message.h"
@@ -26,6 +27,8 @@
 #include "dialog/RegisterDialog.h"
 #include "dialog/AddFriendDialog.h"
 #include "model/FriendRequest.h"
+
+#include <QHash>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -57,7 +60,9 @@ private:
     QPushButton *m_contactsModeButton;
 
     QLabel *m_chatTitleLabel;
-    QTextBrowser *m_messageDisplay;
+    QScrollArea *m_messageScrollArea;
+    QWidget *m_messageContainer;
+    QVBoxLayout *m_messageLayout;
     QLineEdit *m_messageInput;
     QPushButton *m_sendButton;
 
@@ -86,6 +91,7 @@ private:
     
     QString m_pendingFriendRequestId;
     QString m_pendingFriendRequestAction;
+    QHash<QString, int> m_unreadCounts;
 
 private:
     // 初始化
@@ -138,6 +144,19 @@ private:
     void showFriendRequestMessages();
     void handleFriendRequestLinkClicked(const QUrl& url);
     void addOrUpdateFriendRequest(const FriendRequest& request);
+    void incrementUnreadCount(const QString& conversationId);
+    void clearUnreadCount(const QString& conversationId);
+    int unreadCount(const QString& conversationId) const;
+    void refreshUnreadBadges();
+    void clearMessageArea();
+    void addMessageWidget(QWidget *widget);
+    void scrollMessagesToBottom();
+
+    void addSystemNoticeCard(const QString& text);
+    void addFriendRequestCard(const FriendRequest& request);
+    void setConversationListItemWidget(QListWidgetItem *item,const QString& title,const QString& subtitle,int unreadCount);
+    QString itemRawTitle(QListWidgetItem *item) const;
+    QString itemRawSubtitle(QListWidgetItem *item) const;
 
 };
 

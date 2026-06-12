@@ -3,6 +3,8 @@ project(Qtchat LANGUAGES CXX)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Sql Network)
 
+set(CMAKE_AUTORCC ON)
+
 qt_standard_project_setup()
 
 qt_add_executable(Qtchat
@@ -36,6 +38,9 @@ qt_add_executable(Qtchat
     dialog/AddFriendDialog.h
     dialog/AddFriendDialog.cpp
     model/FriendRequest.h
+    resources.qrc
+    MessageBubbleWidget.h
+    MessageBubbleWidget.cpp
 )
 qt_add_executable(ChatServer
     server/main.cpp

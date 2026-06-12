@@ -1808,33 +1808,85 @@ void ChatServer::handleRespondFriendRequest(QTcpSocket *clientSocket,
 
     QString conversationId;
 
-    if (action == "accept") {
-        if (!ensureFriendship(fromUserId, toUserId)) {
-            sendRespondFriendRequestResult(clientSocket,
-                                           false,
-                                           action,
-                                           "",
-                                           "",
-                                           "",
-                                           "",
-                                           "建立好友关系失败");
-            return;
-        }
+if (action == "accept") {
+    qDebug() << "Accept friend request:"
+             << "requestId =" << requestId
+             << "fromUserId =" << fromUserId
+             << "fromUserName =" << fromUserName
+             << "toUserId =" << toUserId
+             << "toUserName =" << toUserName;
 
-        if (!ensurePrivateConversation(fromUserId, toUserId)) {
-            sendRespondFriendRequestResult(clientSocket,
-                                           false,
-                                           action,
-                                           "",
-                                           "",
-                                           "",
-                                           "",
-                                           "创建私聊会话失败");
-            return;
-        }
+    bool friendshipOk = ensureFriendship(fromUserId, toUserId);
 
-        conversationId = privateConversationIdForUsers(fromUserId, toUserId);
+    qDebug() << "ensureFriendship result:" << friendshipOk;
+
+    if (!friendshipOk) {
+        sendRespondFriendRequestResult(clientSocket,
+                                       false,
+                                       action,
+                                       "",
+                                       "",
+                                       "",
+                                       "",
+                                       "建立好友关系失败");
+        return;
     }
+
+    bool conversationOk = ensurePrivateConversation(fromUserId, toUserId);
+
+    qDebug() << "ensurePrivateConversation result:" << conversationOk;
+
+    if (!conversationOk) {
+        sendRespondFriendRequestResult(clientSocket,
+                                       false,
+                                       action,
+                                       "",
+                                       "",
+                                       "",
+                                       "",
+                                       "创建私聊会话失败");
+        return;
+    }
+
+    QString conversationId = privateConversationIdForUsers(fromUserId, toUserId);
+
+    sendRespondFriendRequestResult(clientSocket,
+                                   true,
+                                   action,
+                                   fromUserId,
+                                   fromUserName,
+                                   "",
+                                   conversationId,
+                                   "");
+
+    notifyContactsUpdated(fromUserId);
+    notifyContactsUpdated(toUserId);
+
+    notifyFriendRequestStatusUpdated(fromUserId,
+                                     requestId,
+                                     1,
+                                     action,
+                                     toUserId,
+                                     toUserName,
+                                     conversationId);
+} else {
+    sendRespondFriendRequestResult(clientSocket,
+                                   true,
+                                   action,
+                                   "",
+                                   "",
+                                   "",
+                                   "",
+                                   "");
+
+    notifyFriendRequestStatusUpdated(fromUserId,
+                                     requestId,
+                                     2,
+                                     action,
+                                     toUserId,
+                                     toUserName,
+                                     "");
+}
 
     qDebug() << "Friend request responded:"
              << requestId
@@ -2002,6 +2054,10 @@ void ChatServer::notifyFriendRequestStatusUpdated(const QString& userId,
 
     if (!targetSocket ||
         targetSocket->state() != QAbstractSocket::ConnectedState) {
+        qDebug() << "Friend request status update target offline:"
+                 << userId
+                 << requestId
+                 << action;
         return;
     }
 
@@ -2024,5 +2080,6 @@ void ChatServer::notifyFriendRequestStatusUpdated(const QString& userId,
     qDebug() << "Notified friend request status updated:"
              << userId
              << requestId
-             << action;
+             << action
+             << status;
 }

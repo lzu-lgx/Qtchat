@@ -19,6 +19,13 @@
 #include <QTextBrowser>
 #include <QUrl>
 #include <QJsonArray>
+#include <QRegularExpression>
+#include "MessageBubbleWidget.h"
+
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QFrame>
+
 
 
 
@@ -33,7 +40,6 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
     , m_conversationList(nullptr)
     , m_chatTitleLabel(nullptr)
-    , m_messageDisplay(nullptr)
     , m_messageInput(nullptr)
     , m_sendButton(nullptr)
     , m_currentConversationId()
@@ -72,22 +78,33 @@ void MainWindow::setupChatUi()
 
 // 主布局
     QHBoxLayout *mainLayout = new QHBoxLayout(central);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
+    mainLayout->setSpacing(0);
 
 // 左侧面板
     QWidget *leftPanel = new QWidget(central);
-    leftPanel->setFixedWidth(220);
+    leftPanel->setObjectName("leftPanel");
+    leftPanel->setFixedWidth(240);
     QVBoxLayout *leftLayout = new QVBoxLayout(leftPanel);
-    leftLayout->setContentsMargins(8, 8, 8, 8);
-    leftLayout->setSpacing(8);
+    leftLayout->setContentsMargins(12, 12, 12, 12);
+    leftLayout->setSpacing(10);
 
 // 左侧顶部按钮
     m_conversationModeButton = new QPushButton("会话列表", leftPanel);
     m_contactsModeButton = new QPushButton("通讯录", leftPanel);
     m_addFriendButton = new QPushButton("添加好友", leftPanel);
+    m_conversationModeButton->setObjectName("modeButton");
+    m_contactsModeButton->setObjectName("modeButton");
+    m_addFriendButton->setObjectName("addFriendButton");
+    m_conversationModeButton->setFixedHeight(32);
+    m_contactsModeButton->setFixedHeight(32);
+    m_addFriendButton->setFixedHeight(32);
     m_addFriendButton->setVisible(false); // 默认隐藏
 
 // 会话/联系人列表
     m_conversationList = new QListWidget(leftPanel);
+    m_conversationList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_conversationList->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 
 // 横向按钮布局
     QHBoxLayout *modeButtonLayout = new QHBoxLayout;
@@ -102,32 +119,49 @@ void MainWindow::setupChatUi()
 
 // 聊天右侧面板
     QWidget *chatWidget = new QWidget(central);
+    chatWidget->setObjectName("chatWidget");
     QVBoxLayout *chatLayout = new QVBoxLayout(chatWidget);
-    chatLayout->setContentsMargins(0, 0, 0, 0);
-    chatLayout->setSpacing(8);
+    chatLayout->setContentsMargins(16, 12, 16, 12);
+    chatLayout->setSpacing(10);
 
     m_chatTitleLabel = new QLabel("请选择一个会话", chatWidget);
-    m_chatTitleLabel->setMinimumHeight(40);
+    m_chatTitleLabel->setObjectName("chatTitleLabel");
+    m_chatTitleLabel->setMinimumHeight(44);
 
-    m_messageDisplay = new QTextBrowser(chatWidget);
-    m_messageDisplay->setReadOnly(true);
-    m_messageDisplay->setOpenLinks(false);
-    m_messageDisplay->setOpenExternalLinks(false);
+    m_messageScrollArea = new QScrollArea(chatWidget);
+    m_messageScrollArea->setWidgetResizable(true);
+    m_messageScrollArea->setFrameShape(QFrame::NoFrame);
+    m_messageScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_messageScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+
+    m_messageContainer = new QWidget(m_messageScrollArea);
+    m_messageContainer->setObjectName("messageContainer");
+    m_messageLayout = new QVBoxLayout(m_messageContainer);
+    m_messageLayout->setContentsMargins(12, 12, 12, 12);
+    m_messageLayout->setSpacing(6);
+    m_messageLayout->addStretch();
+
+    m_messageScrollArea->setWidget(m_messageContainer);
 
     QWidget *inputWidget = new QWidget(chatWidget);
+    inputWidget->setObjectName("inputWidget");
     QHBoxLayout *inputLayout = new QHBoxLayout(inputWidget);
-    inputLayout->setContentsMargins(0, 0, 0, 0);
-    inputLayout->setSpacing(8);
+    inputLayout->setContentsMargins(0, 8, 0, 0);
+    inputLayout->setSpacing(10);
 
     m_messageInput = new QLineEdit(inputWidget);
     m_messageInput->setPlaceholderText("请输入消息...");
+    m_messageInput->setFixedHeight(34);
     m_sendButton = new QPushButton("发送", inputWidget);
+    m_sendButton->setObjectName("sendButton");
+    m_sendButton->setFixedHeight(34);
+    m_sendButton->setMinimumWidth(76);
 
     inputLayout->addWidget(m_messageInput);
     inputLayout->addWidget(m_sendButton);
 
     chatLayout->addWidget(m_chatTitleLabel);
-    chatLayout->addWidget(m_messageDisplay);
+    chatLayout->addWidget(m_messageScrollArea);
     chatLayout->addWidget(inputWidget);
 
 // 添加到主布局
@@ -152,9 +186,11 @@ void MainWindow::setupChatUi()
             m_chatTitleLabel->setText(item->text());
 
             if (isFriendRequestsConversation(conversationId)) {
+                clearUnreadCount(kFriendRequestsConversationId);
                 showFriendRequestMessages();
                 return;
             }
+            clearUnreadCount(conversationId);
             showMessagesForConversation(conversationId);
             return;
         }
@@ -258,9 +294,6 @@ void MainWindow::setupChatUi()
         handleAddFriend();
     });
 
-    connect(m_messageDisplay, &QTextBrowser::anchorClicked,
-        this, &MainWindow::handleFriendRequestLinkClicked);
-
 }
 
 
@@ -279,10 +312,12 @@ void MainWindow::loadConversations()
                            + "\n"
                            + conversation.lastMessage();
 
-        QListWidgetItem *item = new QListWidgetItem(itemText);
+        QListWidgetItem *item = new QListWidgetItem;
         item->setData(Qt::UserRole, conversation.id());
 
         m_conversationList->addItem(item);
+
+        setConversationListItemWidget(item,conversation.title(),conversation.lastMessage(),unreadCount(conversation.id()));
 
         if (conversation.id() == m_currentConversationId) {
             itemToSelect = item;
@@ -306,29 +341,51 @@ void MainWindow::loadConversations()
 
 void MainWindow::showMessagesForConversation(const QString& conversationId)
 {
-    m_messageDisplay->clear();
-
+    
+    clearMessageArea();
     m_messageInput->setEnabled(true);
     m_sendButton->setEnabled(true);
 
     QList<Message> messages =
         m_dbManager.loadMessages(conversationId);
 
-    QString text;
-
+    
     for (const Message& message : messages) {
-        QString senderName = displayNameForSender(message.senderId());
+    QString senderId = message.senderId();
+    QString senderName = displayNameForSender(senderId);
+    QString timeText = message.timestamp().toString("yyyy-MM-dd HH:mm");
 
-        QString timeText =
-            message.timestamp().toString("yyyy-MM-dd hh:mm:ss");
+    bool isMine =
+        senderId == m_userId ||
+        senderId == m_userName ||
+        senderId == "me" ||
+        senderId == "我";
 
-        text += senderName + "  " + timeText + "\n";
-        text += message.content() + "\n\n";
+    bool isAi =
+        senderId == "AI 助手" ||
+        senderId == "assistant" ||
+        senderId == "ai" ||
+        senderId == "conv_ai";
+
+    MessageBubbleWidget::Role role = MessageBubbleWidget::Role::Other;
+
+    if (isMine) {
+        role = MessageBubbleWidget::Role::Mine;
+    } else if (isAi) {
+        role = MessageBubbleWidget::Role::Ai;
     }
 
-    m_messageDisplay->setText(text);
+    MessageBubbleWidget *bubble =
+        new MessageBubbleWidget(senderName,
+                                message.content(),
+                                timeText,
+                                role,
+                                m_messageContainer);
 
-    m_messageDisplay->moveCursor(QTextCursor::End);
+    addMessageWidget(bubble);
+}
+    scrollMessagesToBottom();
+
 }
 
 void MainWindow::sendCurrentMessage()
@@ -389,19 +446,19 @@ void MainWindow::handleAiAssistantReply(const QString& conversationId,
 
 void MainWindow::showAiThinkingMessage()
 {
-    QString currentText = m_messageDisplay->toPlainText();
+    QString timeText = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm");
 
-    if (!currentText.isEmpty()) {
-        currentText += "\n";
-    }
+    MessageBubbleWidget *bubble =
+        new MessageBubbleWidget(
+            "AI 助手",
+            "正在思考中...",
+            timeText,
+            MessageBubbleWidget::Role::Ai,
+            m_messageContainer
+        );
 
-    QString timeText = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
-
-    currentText += "AI 助手  " + timeText + "\n";
-    currentText += "正在思考中...\n";
-
-    m_messageDisplay->setText(currentText);
-    m_messageDisplay->moveCursor(QTextCursor::End);
+    addMessageWidget(bubble);
+    scrollMessagesToBottom();
 }
 
 void MainWindow::setupNetwork()
@@ -433,6 +490,8 @@ void MainWindow::setupNetwork()
             return;
         }
 
+        
+
         if (type == "friend_request_received") {
             QString requestId = message.value("request_id").toString();
             QString fromUserId = message.value("from_user_id").toString();
@@ -443,12 +502,13 @@ void MainWindow::setupNetwork()
 
             addOrUpdateFriendRequest(request);
 
-            qDebug() << "Friend request received as message:"
-                    << requestId
-                    << fromUserName;
+            if (!isFriendRequestsConversation(m_currentConversationId)) {
+                incrementUnreadCount(kFriendRequestsConversationId);
+            }
 
             if (m_leftListMode == LeftListMode::Conversations) {
                 ensureFriendRequestsConversation();
+                refreshUnreadBadges();
             }
 
             if (isFriendRequestsConversation(m_currentConversationId)) {
@@ -514,6 +574,13 @@ void MainWindow::setupNetwork()
         addOrUpdateContact(newContact);
 
         m_networkClient.requestContacts(m_userId);
+
+        QTimer::singleShot(500, this, [this]() {m_networkClient.requestContacts(m_userId);});
+
+    }
+
+    if (!isFriendRequestsConversation(m_currentConversationId)) {
+        incrementUnreadCount(kFriendRequestsConversationId);
     }
 
     if (m_leftListMode == LeftListMode::Conversations) {
@@ -578,11 +645,15 @@ void MainWindow::setupNetwork()
                 addOrUpdateContact(newContact);
             }
 
+            QTimer::singleShot(500, this, [this]() {m_networkClient.requestContacts(m_userId);});
+
+            m_networkClient.requestContacts(m_userId);
+
             if (m_leftListMode == LeftListMode::Contacts) {
                 showContactListMode();
             }
 
-            m_networkClient.requestContacts(m_userId);
+            
         }
 
         if (action == "reject") {
@@ -599,6 +670,8 @@ void MainWindow::setupNetwork()
     qDebug() << "Friend requests loaded from server:"
              << requests.size();
 
+    int pendingIncomingCount = 0;
+
     for (const QJsonValue& value : requests) {
         QJsonObject obj = value.toObject();
 
@@ -612,10 +685,20 @@ void MainWindow::setupNetwork()
         );
 
         addOrUpdateFriendRequest(request);
+
+        if (request.status == FriendRequest::Pending) {
+            ++pendingIncomingCount;
+        }
+    }
+
+    if (pendingIncomingCount > 0 &&
+        !isFriendRequestsConversation(m_currentConversationId)) {
+        m_unreadCounts[kFriendRequestsConversationId] = pendingIncomingCount;
     }
 
     if (m_leftListMode == LeftListMode::Conversations) {
         ensureFriendRequestsConversation();
+        refreshUnreadBadges();
     }
 
     if (isFriendRequestsConversation(m_currentConversationId)) {
@@ -760,7 +843,12 @@ void MainWindow::handleJsonNetworkMessage(const QJsonObject& json)
         return;
     }
 
+    if (conversationId != m_currentConversationId) {
+        incrementUnreadCount(conversationId);
+    }
+
     loadConversations();
+    refreshUnreadBadges();
 
     if (m_currentConversationId == conversationId) {
         showMessagesForConversation(conversationId);
@@ -1138,6 +1226,8 @@ void MainWindow::showConversationListMode()
     loadConversations();
 
     ensureFriendRequestsConversation();
+
+    refreshUnreadBadges();
 }
 
 void MainWindow::showContactListMode()
@@ -1281,16 +1371,14 @@ void MainWindow::ensureFriendRequestsConversation()
         }
     }
 
-    QString itemText;
+    QString subtitle;
 
     if (pendingIncomingCount > 0) {
-        itemText = kFriendRequestsConversationTitle + "\n"
-                   + QString("待处理好友申请：%1 条").arg(pendingIncomingCount);
+        subtitle = QString("待处理好友申请：%1 条").arg(pendingIncomingCount);
     } else if (pendingOutgoingCount > 0) {
-        itemText = kFriendRequestsConversationTitle + "\n"
-                   + QString("等待对方验证：%1 条").arg(pendingOutgoingCount);
+        subtitle = QString("等待对方验证：%1 条").arg(pendingOutgoingCount);
     } else {
-        itemText = kFriendRequestsConversationTitle + "\n暂无待处理申请";
+        subtitle = "暂无待处理申请";
     }
 
     for (int i = 0; i < m_conversationList->count(); ++i) {
@@ -1303,15 +1391,23 @@ void MainWindow::ensureFriendRequestsConversation()
         QString conversationId = item->data(Qt::UserRole).toString();
 
         if (conversationId == kFriendRequestsConversationId) {
-            item->setText(itemText);
+            setConversationListItemWidget(item,
+                                          kFriendRequestsConversationTitle,
+                                          subtitle,
+                                          unreadCount(kFriendRequestsConversationId));
             return;
         }
     }
 
-    QListWidgetItem *item = new QListWidgetItem(itemText);
+    QListWidgetItem *item = new QListWidgetItem;
     item->setData(Qt::UserRole, kFriendRequestsConversationId);
 
     m_conversationList->insertItem(0, item);
+
+    setConversationListItemWidget(item,
+                                  kFriendRequestsConversationTitle,
+                                  subtitle,
+                                  unreadCount(kFriendRequestsConversationId));
 }
 
 void MainWindow::showFriendRequestMessages()
@@ -1319,82 +1415,24 @@ void MainWindow::showFriendRequestMessages()
     m_currentConversationId = kFriendRequestsConversationId;
 
     m_chatTitleLabel->setText(kFriendRequestsConversationTitle);
-    m_messageDisplay->clear();
 
     m_messageInput->clear();
     m_messageInput->setEnabled(false);
     m_sendButton->setEnabled(false);
 
+    clearMessageArea();
+
     if (m_friendRequests.isEmpty()) {
-        m_messageDisplay->setHtml(
-            "<div style='color:#999;'>暂无好友申请</div>"
-        );
+        addSystemNoticeCard("暂无好友申请");
+        scrollMessagesToBottom();
         return;
     }
 
-    QString html;
-    html += "<div style='font-family: Microsoft YaHei; font-size: 14px;'>";
-
     for (const FriendRequest& request : m_friendRequests) {
-        QString statusText;
-
-        if (request.status == FriendRequest::Pending) {
-            statusText = request.outgoing ? "等待对方处理" : "待处理";
-        } else if (request.status == FriendRequest::Accepted) {
-            statusText = request.outgoing ? "对方已同意" : "已同意";
-        } else if (request.status == FriendRequest::Rejected) {
-            statusText = request.outgoing ? "对方已拒绝" : "已拒绝";
-        } else {
-            statusText = "未知状态";
-        }
-
-        html += "<div style='margin-bottom: 14px; padding: 10px; "
-                "border: 1px solid #555; border-radius: 6px;'>";
-
-        if (request.outgoing) {
-            QString targetName = request.toUserName.isEmpty()
-                                     ? request.toUserId
-                                     : request.toUserName;
-
-            html += "<b>你已向 "
-                    + targetName.toHtmlEscaped()
-                    + " 发送好友申请</b><br>";
-
-            html += "<span style='color:#aaa;'>等待对方处理你的好友申请</span><br>";
-        } else {
-            html += "<b>"
-                    + request.fromUserName.toHtmlEscaped()
-                    + " 请求添加你为好友</b><br>";
-
-            html += "<span style='color:#aaa;'>"
-                    + request.message.toHtmlEscaped()
-                    + "</span><br>";
-        }
-
-        html += "<span style='color:#888;'>状态："
-                + statusText.toHtmlEscaped()
-                + "</span><br>";
-
-        if (!request.outgoing &&
-            request.status == FriendRequest::Pending) {
-            QString acceptUrl =
-                "friend-request://accept/" + request.requestId;
-
-            QString rejectUrl =
-                "friend-request://reject/" + request.requestId;
-
-            html += "<br>";
-            html += "<a href='" + acceptUrl + "'>同意</a>";
-            html += "&nbsp;&nbsp;";
-            html += "<a href='" + rejectUrl + "'>拒绝</a>";
-        }
-
-        html += "</div>";
+        addFriendRequestCard(request);
     }
 
-    html += "</div>";
-
-    m_messageDisplay->setHtml(html);
+    scrollMessagesToBottom();
 }
 
 void MainWindow::handleFriendRequestLinkClicked(const QUrl& url)
@@ -1470,4 +1508,410 @@ void MainWindow::addOrUpdateFriendRequest(const FriendRequest& request)
     }
 
     m_friendRequests.append(request);
+}
+
+int MainWindow::unreadCount(const QString& conversationId) const
+{
+    return m_unreadCounts.value(conversationId, 0);
+}
+
+void MainWindow::incrementUnreadCount(const QString& conversationId)
+{
+    if (conversationId.isEmpty()) {
+        return;
+    }
+
+    int count = m_unreadCounts.value(conversationId, 0);
+    m_unreadCounts[conversationId] = count + 1;
+
+    refreshUnreadBadges();
+}
+
+void MainWindow::clearUnreadCount(const QString& conversationId)
+{
+    if (conversationId.isEmpty()) {
+        return;
+    }
+
+    if (!m_unreadCounts.contains(conversationId)) {
+        return;
+    }
+
+    m_unreadCounts.remove(conversationId);
+
+    refreshUnreadBadges();
+}
+
+void MainWindow::refreshUnreadBadges()
+{
+    if (!m_conversationList) {
+        return;
+    }
+
+    if (m_leftListMode != LeftListMode::Conversations) {
+        return;
+    }
+
+    for (int i = 0; i < m_conversationList->count(); ++i) {
+        QListWidgetItem *item = m_conversationList->item(i);
+
+        if (!item) {
+            continue;
+        }
+
+        QString conversationId = item->data(Qt::UserRole).toString();
+
+        if (conversationId.isEmpty()) {
+            continue;
+        }
+
+        QString title = itemRawTitle(item);
+        QString subtitle = itemRawSubtitle(item);
+
+        if (title.isEmpty()) {
+            title = item->text();
+        }
+
+        int count = unreadCount(conversationId);
+
+        setConversationListItemWidget(item, title, subtitle, count);
+    }
+}
+
+void MainWindow::clearMessageArea()
+{
+    if (!m_messageLayout) {
+        return;
+    }
+
+    while (QLayoutItem *item = m_messageLayout->takeAt(0)) {
+        QWidget *widget = item->widget();
+
+        if (widget) {
+            widget->deleteLater();
+        }
+
+        delete item;
+    }
+
+    m_messageLayout->addStretch();
+}
+
+void MainWindow::addMessageWidget(QWidget *widget)
+{
+    if (!m_messageLayout || !widget) {
+        return;
+    }
+
+    int insertIndex = qMax(0, m_messageLayout->count() - 1);
+    m_messageLayout->insertWidget(insertIndex, widget);
+}
+
+void MainWindow::scrollMessagesToBottom()
+{
+    if (!m_messageScrollArea || !m_messageContainer) {
+        return;
+    }
+
+    m_messageContainer->adjustSize();
+    m_messageContainer->updateGeometry();
+    m_messageScrollArea->updateGeometry();
+
+    auto scrollToBottom = [this]() {
+        if (!m_messageScrollArea) {
+            return;
+        }
+
+        QScrollBar *bar = m_messageScrollArea->verticalScrollBar();
+
+        if (bar) {
+            bar->setValue(bar->maximum());
+        }
+    };
+
+    QTimer::singleShot(0, this, scrollToBottom);
+    QTimer::singleShot(50, this, scrollToBottom);
+    QTimer::singleShot(120, this, scrollToBottom);
+}
+
+void MainWindow::addSystemNoticeCard(const QString& text)
+{
+    QFrame *card = new QFrame(m_messageContainer);
+    card->setStyleSheet(
+        "QFrame {"
+        "background-color: #303030;"
+        "border: 1px solid #444444;"
+        "border-radius: 10px;"
+        "}"
+    );
+
+    QVBoxLayout *layout = new QVBoxLayout(card);
+    layout->setContentsMargins(14, 10, 14, 10);
+
+    QLabel *label = new QLabel(text, card);
+    label->setWordWrap(true);
+    label->setAlignment(Qt::AlignCenter);
+    label->setStyleSheet(
+        "color: #aaaaaa;"
+        "font-size: 14px;"
+    );
+
+    layout->addWidget(label);
+
+    addMessageWidget(card);
+}
+
+void MainWindow::addFriendRequestCard(const FriendRequest& request)
+{
+    QFrame *card = new QFrame(m_messageContainer);
+    card->setStyleSheet(
+        "QFrame {"
+        "background-color: #2b2b2b;"
+        "border: 1px solid #4a4a4a;"
+        "border-radius: 12px;"
+        "}"
+    );
+
+    QVBoxLayout *layout = new QVBoxLayout(card);
+    layout->setContentsMargins(14, 12, 14, 12);
+    layout->setSpacing(8);
+
+    QLabel *titleLabel = new QLabel(card);
+    titleLabel->setWordWrap(true);
+    titleLabel->setStyleSheet(
+        "color: #ffffff;"
+        "font-size: 15px;"
+        "font-weight: bold;"
+    );
+
+    QLabel *messageLabel = new QLabel(card);
+    messageLabel->setWordWrap(true);
+    messageLabel->setStyleSheet(
+        "color: #bbbbbb;"
+        "font-size: 13px;"
+    );
+
+    QLabel *statusLabel = new QLabel(card);
+    statusLabel->setStyleSheet(
+        "color: #888888;"
+        "font-size: 12px;"
+    );
+
+    QString statusText;
+
+    if (request.status == FriendRequest::Pending) {
+        statusText = request.outgoing ? "等待对方处理" : "待处理";
+    } else if (request.status == FriendRequest::Accepted) {
+        statusText = request.outgoing ? "对方已同意" : "已同意";
+    } else if (request.status == FriendRequest::Rejected) {
+        statusText = request.outgoing ? "对方已拒绝" : "已拒绝";
+    } else {
+        statusText = "未知状态";
+    }
+
+    if (request.outgoing) {
+        QString targetName = request.toUserName.isEmpty()
+                                 ? request.toUserId
+                                 : request.toUserName;
+
+        titleLabel->setText("你已向 " + targetName + " 发送好友申请");
+        messageLabel->setText("等待对方处理你的好友申请");
+    } else {
+        titleLabel->setText(request.fromUserName + " 请求添加你为好友");
+        messageLabel->setText(request.message);
+    }
+
+    statusLabel->setText("状态：" + statusText);
+
+    layout->addWidget(titleLabel);
+    layout->addWidget(messageLabel);
+    layout->addWidget(statusLabel);
+
+    if (!request.outgoing &&
+        request.status == FriendRequest::Pending) {
+        QHBoxLayout *buttonLayout = new QHBoxLayout;
+        buttonLayout->setContentsMargins(0, 4, 0, 0);
+        buttonLayout->addStretch();
+
+        QPushButton *acceptButton = new QPushButton("同意", card);
+        QPushButton *rejectButton = new QPushButton("拒绝", card);
+
+        acceptButton->setFixedHeight(30);
+        rejectButton->setFixedHeight(30);
+        acceptButton->setMinimumWidth(72);
+        rejectButton->setMinimumWidth(72);
+
+        acceptButton->setStyleSheet(
+            "QPushButton {"
+            "background-color: #3d7eff;"
+            "color: white;"
+            "border: none;"
+            "border-radius: 6px;"
+            "padding: 4px 12px;"
+            "}"
+            "QPushButton:hover {"
+            "background-color: #5a91ff;"
+            "}"
+        );
+
+        rejectButton->setStyleSheet(
+            "QPushButton {"
+            "background-color: #3a3a3a;"
+            "color: #dddddd;"
+            "border: 1px solid #555555;"
+            "border-radius: 6px;"
+            "padding: 4px 12px;"
+            "}"
+            "QPushButton:hover {"
+            "background-color: #4a4a4a;"
+            "}"
+        );
+
+        
+       connect(acceptButton, &QPushButton::clicked,
+        this, [this, request]() {
+    m_pendingFriendRequestId = request.requestId;
+    m_pendingFriendRequestAction = "accept";
+
+    m_networkClient.respondFriendRequest(
+        request.requestId,
+        m_userId,
+        "accept"
+    );
+
+    // 关键修复：同意后，当前处理方主动刷新通讯录
+    QTimer::singleShot(300, this, [this]() {
+        qDebug() << "Refresh contacts after accepting friend request:"
+                 << m_userId;
+        m_networkClient.requestContacts(m_userId);
+    });
+
+    QTimer::singleShot(1000, this, [this]() {
+        qDebug() << "Refresh contacts again after accepting friend request:"
+                 << m_userId;
+        m_networkClient.requestContacts(m_userId);
+    });
+});
+
+        connect(rejectButton, &QPushButton::clicked,
+                this, [this, request]() {
+            m_pendingFriendRequestId = request.requestId;
+            m_pendingFriendRequestAction = "reject";
+
+            m_networkClient.respondFriendRequest(
+                request.requestId,
+                m_userId,
+                "reject"
+            );
+        });
+
+        buttonLayout->addWidget(acceptButton);
+        buttonLayout->addWidget(rejectButton);
+
+        layout->addLayout(buttonLayout);
+    }
+
+    QWidget *wrapper = new QWidget(m_messageContainer);
+    QHBoxLayout *wrapperLayout = new QHBoxLayout(wrapper);
+    wrapperLayout->setContentsMargins(0, 4, 0, 4);
+
+    wrapperLayout->addWidget(card);
+    wrapperLayout->addStretch();
+
+    card->setMaximumWidth(460);
+
+    addMessageWidget(wrapper);
+}
+
+void MainWindow::setConversationListItemWidget(QListWidgetItem *item,
+                                               const QString& title,
+                                               const QString& subtitle,
+                                               int unreadCount)
+{
+    if (!item || !m_conversationList) {
+        return;
+    }
+
+    item->setData(Qt::UserRole + 1, title);
+    item->setData(Qt::UserRole + 2, subtitle);
+
+    QWidget *rowWidget = new QWidget(m_conversationList);
+    rowWidget->setStyleSheet("background: transparent;");
+
+    QHBoxLayout *rowLayout = new QHBoxLayout(rowWidget);
+    rowLayout->setContentsMargins(10, 8, 10, 8);
+    rowLayout->setSpacing(8);
+
+    QVBoxLayout *textLayout = new QVBoxLayout;
+    textLayout->setContentsMargins(0, 0, 0, 0);
+    textLayout->setSpacing(3);
+
+    QLabel *titleLabel = new QLabel(title, rowWidget);
+    titleLabel->setStyleSheet(
+        "color: #ffffff;"
+        "font-size: 14px;"
+        "font-weight: bold;"
+        "background: transparent;"
+    );
+
+    QLabel *subtitleLabel = new QLabel(subtitle, rowWidget);
+    subtitleLabel->setStyleSheet(
+        "color: #b0b0b0;"
+        "font-size: 12px;"
+        "background: transparent;"
+    );
+    subtitleLabel->setMaximumHeight(18);
+
+    textLayout->addWidget(titleLabel);
+    textLayout->addWidget(subtitleLabel);
+
+    rowLayout->addLayout(textLayout);
+    rowLayout->addStretch();
+
+    if (unreadCount > 0) {
+        QLabel *badgeLabel = new QLabel(rowWidget);
+
+        QString badgeText = unreadCount > 99 ? "99+" : QString::number(unreadCount);
+        badgeLabel->setText(badgeText);
+        badgeLabel->setAlignment(Qt::AlignCenter);
+
+        badgeLabel->setStyleSheet(
+            "QLabel {"
+            "background-color: #ff4d4f;"
+            "color: white;"
+            "border-radius: 9px;"
+            "font-size: 11px;"
+            "font-weight: bold;"
+            "padding: 1px 5px;"
+            "}"
+        );
+
+        badgeLabel->setMinimumWidth(18);
+        badgeLabel->setFixedHeight(18);
+
+        rowLayout->addWidget(badgeLabel, 0, Qt::AlignTop);
+    }
+
+    item->setSizeHint(QSize(200, 64));
+    item->setText(QString());
+
+    m_conversationList->setItemWidget(item, rowWidget);
+}
+
+QString MainWindow::itemRawTitle(QListWidgetItem *item) const
+{
+    if (!item) {
+        return QString();
+    }
+
+    return item->data(Qt::UserRole + 1).toString();
+}
+
+QString MainWindow::itemRawSubtitle(QListWidgetItem *item) const
+{
+    if (!item) {
+        return QString();
+    }
+
+    return item->data(Qt::UserRole + 2).toString();
 }
